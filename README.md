@@ -1,5 +1,7 @@
 # Claude Limit Meter
 
+[Download VSIX v0.3.6](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.6/claude-limit-meter-0.3.6.vsix) | [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.6)
+
 ![Claude Limit Meter status bar and tooltip](claude-limit-meter-0.3.0.png)
 
 Русская версия с расширенными подробностями: [README_ru.md](README_ru.md).

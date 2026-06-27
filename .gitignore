@@ -8,6 +8,7 @@
 # Build artifacts
 *.vsix
 node_modules/
+_unpacked/
 
 # Dev-only screenshots used for issue reproduction
 Screenshot_*.png
