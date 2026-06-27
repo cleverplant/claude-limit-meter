@@ -1,0 +1,29 @@
+# Secrets — NEVER commit these
+.env
+.env.*
+.secrets/
+*.token
+*.key
+
+# Build artifacts
+*.vsix
+node_modules/
+
+# Dev-only screenshots used for issue reproduction
+Screenshot_*.png
+
+# Temp scripts
+fix-registry.js
+*.log
+*.tmp
+
+# OS / IDE noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Local install script output / backups
+*.bak
+*.bak-*

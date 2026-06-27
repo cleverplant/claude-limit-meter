@@ -1,0 +1,33 @@
+# Secrets — must never ship inside the .vsix
+.env
+.env.*
+.secrets/**
+*.token
+*.key
+
+# Dev-only artifacts
+Screenshot_*.png
+install.ps1
+fix-registry.js
+*.vsix
+*.log
+*.tmp
+*.bak
+*.bak-*
+
+# Repo / VCS plumbing
+.git/**
+.gitignore
+.gitattributes
+.vscodeignore
+
+# Project docs intended for contributors, not end-users
+CLAUDE.md
+
+# Node / IDE noise
+node_modules/**
+.vscode/**
+.idea/**
+.DS_Store
+Thumbs.db
+desktop.ini

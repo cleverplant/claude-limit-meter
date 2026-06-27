@@ -1,0 +1,764 @@
+const vscode = require("vscode");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+let statusItem;
+let kickItem;
+let timer;
+let lastSnapshot;
+let lastKickState;
+let lastRenderedText;
+let lastRenderedColor;
+let lastTooltipKey;
+let lastKickText;
+let lastKickColor;
+let lastKickVisible;
+const fileEventCache = new Map();
+
+let extensionContext;
+
+function activate(context) {
+  extensionContext = context;
+
+  // Remove leftover installs of older versions of THIS extension that linger
+  // in ~/.vscode/extensions when the user installs via the VSIX UI (which
+  // doesn't auto-prune previous version folders). VS Code has already picked
+  // our version as the active one by the time activate() runs, so deletion
+  // of sibling older folders is safe.
+  try {
+    cleanupOlderInstalls(context);
+  } catch (error) {
+    // Cleanup is best-effort; never block activation on it.
+  }
+
+  // Auto-install kick hook artifacts (script + slash commands + settings.json merge).
+  // Idempotent — safe to call on every activate.
+  try {
+    ensureKickArtifacts(context, { force: false });
+  } catch (error) {
+    vscode.window.showWarningMessage(`Kick hook install failed: ${error.message}`);
+  }
+
+  const priority = vscode.workspace.getConfiguration("claudeLimitMeter").get("statusBarPriority", 999);
+  statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, priority);
+  statusItem.name = "Claude Limit Meter";
+  statusItem.command = "claudeLimitMeter.openUsagePage";
+  statusItem.show();
+
+  // Higher priority on the right cluster = further LEFT. To place kick item to the
+  // RIGHT of cc-ctx, use a lower priority (priority - 1).
+  kickItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, priority - 1);
+  kickItem.name = "Kick Auto-Handoff";
+  kickItem.command = "claudeLimitMeter.toggleKickHook";
+  if (vscode.workspace.getConfiguration("claudeLimitMeter").get("showKickStatus", true)) {
+    kickItem.show();
+  }
+
+  context.subscriptions.push(statusItem);
+  context.subscriptions.push(kickItem);
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.refresh", refresh));
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.toggleBar", toggleBar));
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.openUsagePage", openUsagePage));
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.toggleKickHook", toggleKickHook));
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.reinstallKickHook", () => {
+    try { ensureKickArtifacts(context, { force: true });
+      vscode.window.showInformationMessage("Kick hook reinstalled.");
+    } catch (e) { vscode.window.showErrorMessage(`Reinstall failed: ${e.message}`); }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("claudeLimitMeter.uninstallKickHook", () => {
+    try { uninstallKickArtifacts();
+      vscode.window.showInformationMessage("Kick hook uninstalled.");
+    } catch (e) { vscode.window.showErrorMessage(`Uninstall failed: ${e.message}`); }
+  }));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration("claudeLimitMeter")) {
+      fileEventCache.clear();
+      lastRenderedText = undefined;
+      lastRenderedColor = undefined;
+      lastTooltipKey = undefined;
+      lastKickVisible = undefined;
+      restartTimer();
+      refresh();
+    }
+  }));
+
+  restartTimer();
+  refresh();
+}
+
+function deactivate() {
+  if (timer) clearInterval(timer);
+  timer = undefined;
+  if (kickItem) {
+    kickItem.dispose();
+    kickItem = undefined;
+  }
+}
+
+function restartTimer() {
+  if (timer) clearInterval(timer);
+  const seconds = vscode.workspace.getConfiguration("claudeLimitMeter").get("updateIntervalSeconds", 10);
+  timer = setInterval(refresh, Math.max(2, seconds) * 1000);
+}
+
+function refresh() {
+  try {
+    lastSnapshot = readLatestSnapshot();
+    lastKickState = readKickState();
+    render(lastSnapshot);
+    renderKick(lastKickState);
+  } catch (error) {
+    lastSnapshot = undefined;
+    statusItem.text = "$(warning) cc-ctx ?";
+    statusItem.color = getTextColor();
+    statusItem.tooltip = `Ошибка Claude Limit Meter: ${error.message}`;
+  }
+}
+
+function readKickState() {
+  const markerPath = path.join(os.homedir(), ".claude", ".kick-disabled");
+  return { enabled: !fs.existsSync(markerPath) };
+}
+
+function renderKick(state) {
+  if (!kickItem) return;
+  const showKick = vscode.workspace.getConfiguration("claudeLimitMeter").get("showKickStatus", true);
+  if (!showKick) {
+    if (lastKickVisible !== false) {
+      kickItem.hide();
+      lastKickVisible = false;
+    }
+    return;
+  }
+  if (lastKickVisible !== true) {
+    kickItem.show();
+    lastKickVisible = true;
+  }
+
+  const text = state.enabled ? "🟢" : "⚪";
+  const color = getTextColor();
+
+  if (lastKickText !== text) {
+    kickItem.text = text;
+    lastKickText = text;
+  }
+  if (lastKickColor !== color) {
+    kickItem.color = color;
+    lastKickColor = color;
+  }
+  // Idempotent show/hide: calling kickItem.show() every tick on an already-shown
+  // item triggers a status bar group relayout, which closes the open tooltip on
+  // the adjacent cc-ctx item — perceived as blinking every updateIntervalSeconds.
+  // No tooltip on this item; the cc-ctx tooltip is the only popup in the group.
+}
+
+async function toggleKickHook() {
+  const claudeDir = path.join(os.homedir(), ".claude");
+  const markerPath = path.join(claudeDir, ".kick-disabled");
+  try {
+    if (fs.existsSync(markerPath)) {
+      fs.unlinkSync(markerPath);
+      vscode.window.setStatusBarMessage("$(check) Kick auto-hook: ENABLED", 3000);
+    } else {
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(markerPath, "");
+      vscode.window.setStatusBarMessage("$(circle-slash) Kick auto-hook: DISABLED", 3000);
+    }
+    refresh();
+  } catch (error) {
+    vscode.window.showErrorMessage(`Не удалось переключить kick-hook: ${error.message}`);
+  }
+}
+
+function getClaudeHome() {
+  return process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude");
+}
+
+function readLatestSnapshot() {
+  const projectsDir = path.join(getClaudeHome(), "projects");
+  if (!fs.existsSync(projectsDir)) {
+    return { kind: "missing", message: `Папка сессий Claude не найдена: ${projectsDir}` };
+  }
+
+  const allFiles = listJsonlFiles(projectsDir)
+    .map((file) => ({ file, mtimeMs: safeStat(file)?.mtimeMs || 0 }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  const recentFiles = allFiles.slice(0, 40);
+
+  let best;
+  for (const entry of recentFiles) {
+    const event = readLastAssistantUsage(entry.file);
+    if (!event) continue;
+    const ts = Date.parse(event.timestamp || 0) || entry.mtimeMs;
+    if (!best || ts > best.tsMs) {
+      best = { ...event, file: entry.file, tsMs: ts };
+    }
+  }
+
+  if (!best) {
+    return { kind: "missing", message: "В свежих логах Claude не найдено событий usage." };
+  }
+
+  const usage = best.usage || {};
+  const inputTokens = Number(usage.input_tokens || 0);
+  const cacheCreation = Number(usage.cache_creation_input_tokens || 0);
+  const cacheRead = Number(usage.cache_read_input_tokens || 0);
+  const outputTokens = Number(usage.output_tokens || 0);
+  const contextTokens = inputTokens + cacheCreation + cacheRead;
+  // Match Claude Code's own status-line formula: effective context window is
+  // `model_window − maxOutputTokens − 13000` (auto-compact safety margin).
+  // Source: anthropic.claude-code webview bundle, vXe() in 2.1.187.
+  const rawWindow = resolveContextWindow(best.model);
+  const maxOutput = resolveMaxOutput(best.model);
+  const windowSize = Math.max(1, rawWindow - maxOutput - 13000);
+  const usedPercent = (contextTokens / windowSize) * 100;
+  const leftTokens = Math.max(0, windowSize - contextTokens);
+
+  const aggregates = aggregateUsage(allFiles);
+
+  return {
+    kind: "ok",
+    timestamp: best.timestamp,
+    file: best.file,
+    model: best.model,
+    sessionId: best.sessionId,
+    inputTokens,
+    cacheCreation,
+    cacheRead,
+    outputTokens,
+    contextTokens,
+    windowSize,
+    rawWindow,
+    maxOutput,
+    usedPercent,
+    leftTokens,
+    aggregates
+  };
+}
+
+function listJsonlFiles(root) {
+  const result = [];
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        result.push(fullPath);
+      }
+    }
+  }
+  return result;
+}
+
+function safeStat(file) {
+  try {
+    return fs.statSync(file);
+  } catch {
+    return undefined;
+  }
+}
+
+function readLastAssistantUsage(file) {
+  const stat = safeStat(file);
+  if (!stat || stat.size <= 0) return undefined;
+
+  const maxBytes = 768 * 1024;
+  const start = Math.max(0, stat.size - maxBytes);
+  const length = stat.size - start;
+  const fd = fs.openSync(file, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, start);
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index].trim();
+      if (!line || !line.includes('"usage"') || !line.includes('"assistant"')) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type !== "assistant") continue;
+        const msg = event.message || {};
+        if (!msg.usage) continue;
+        return {
+          timestamp: event.timestamp,
+          model: msg.model,
+          sessionId: event.sessionId,
+          usage: msg.usage
+        };
+      } catch {
+        // Ignore partial lines from tail reads.
+      }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return undefined;
+}
+
+function aggregateUsage(allFiles) {
+  const config = vscode.workspace.getConfiguration("claudeLimitMeter");
+  const show5h = config.get("show5hUsage", true);
+  const showWeekly = config.get("showWeeklyUsage", true);
+  if (!show5h && !showWeekly) {
+    return { messages5h: 0, input5h: 0, output5h: 0, cache5h: 0,
+             messagesWeek: 0, inputWeek: 0, outputWeek: 0, cacheWeek: 0,
+             block5hStartMs: 0, weekStartMs: 0 };
+  }
+
+  const scanHours = config.get("scanWindowHours", 192);
+  const now = Date.now();
+  const earliestMs = now - scanHours * 3600 * 1000;
+  const block5hStartMs = now - 5 * 3600 * 1000;
+  const weekStartMs = computeWeekStartMs(now);
+
+  let messages5h = 0;
+  let input5h = 0;
+  let output5h = 0;
+  let cache5h = 0;
+  let messagesWeek = 0;
+  let inputWeek = 0;
+  let outputWeek = 0;
+  let cacheWeek = 0;
+
+  const seenMessageIds = new Set();
+
+  for (const entry of allFiles) {
+    if (entry.mtimeMs < earliestMs) continue;
+    const events = readAllAssistantUsages(entry.file, earliestMs);
+    for (const ev of events) {
+      const tsMs = Date.parse(ev.timestamp || 0);
+      if (!tsMs || tsMs < earliestMs) continue;
+      if (ev.messageId && seenMessageIds.has(ev.messageId)) continue;
+      if (ev.messageId) seenMessageIds.add(ev.messageId);
+
+      const u = ev.usage || {};
+      const inp = Number(u.input_tokens || 0);
+      const out = Number(u.output_tokens || 0);
+      const cache = Number(u.cache_creation_input_tokens || 0) + Number(u.cache_read_input_tokens || 0);
+
+      if (showWeekly && tsMs >= weekStartMs) {
+        messagesWeek += 1;
+        inputWeek += inp;
+        outputWeek += out;
+        cacheWeek += cache;
+      }
+      if (show5h && tsMs >= block5hStartMs) {
+        messages5h += 1;
+        input5h += inp;
+        output5h += out;
+        cache5h += cache;
+      }
+    }
+  }
+
+  return {
+    messages5h, input5h, output5h, cache5h,
+    messagesWeek, inputWeek, outputWeek, cacheWeek,
+    block5hStartMs, weekStartMs
+  };
+}
+
+function readAllAssistantUsages(file, earliestMs) {
+  const stat = safeStat(file);
+  if (!stat || stat.size <= 0) return [];
+  if (stat.mtimeMs < earliestMs) return [];
+
+  const cached = fileEventCache.get(file);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.events;
+  }
+
+  const events = [];
+  let buffer;
+  try {
+    buffer = fs.readFileSync(file);
+  } catch {
+    return events;
+  }
+  const text = buffer.toString("utf8");
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || !line.includes('"usage"') || !line.includes('"assistant"')) continue;
+    try {
+      const event = JSON.parse(line);
+      if (event.type !== "assistant") continue;
+      const msg = event.message || {};
+      if (!msg.usage) continue;
+      events.push({
+        timestamp: event.timestamp,
+        messageId: msg.id,
+        model: msg.model,
+        usage: msg.usage
+      });
+    } catch {
+      // Skip malformed lines.
+    }
+  }
+
+  fileEventCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, events });
+  if (fileEventCache.size > 256) {
+    const firstKey = fileEventCache.keys().next().value;
+    fileEventCache.delete(firstKey);
+  }
+  return events;
+}
+
+function computeWeekStartMs(nowMs) {
+  const d = new Date(nowMs);
+  const day = d.getDay();
+  const daysSinceMonday = (day + 6) % 7;
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - daysSinceMonday);
+  return d.getTime();
+}
+
+function resolveContextWindow(model) {
+  const override = vscode.workspace.getConfiguration("claudeLimitMeter").get("contextWindowOverride", 0);
+  if (override && override > 0) return override;
+
+  if (!model || typeof model !== "string") return 200000;
+  const m = model.toLowerCase();
+  // Claude 4.x and 3.x families default to 200K. Sonnet 4.x can run at 1M with the [1m] beta header.
+  if (m.includes("[1m]")) return 1000000;
+  if (m.startsWith("claude-")) return 200000;
+  return 200000;
+}
+
+function resolveMaxOutput(model) {
+  // Per-model max output tokens. Claude Code reserves this slice plus a
+  // fixed 13K safety margin before computing the "context used" percent.
+  // 64K matches Claude 4.6/4.7 (Opus and Sonnet); older 4.0/4.1 Opus and
+  // 3.x models cap at 8K. Haiku 4.5 is 64K per Anthropic docs.
+  if (!model || typeof model !== "string") return 64000;
+  const m = model.toLowerCase();
+  // Older Opus 4.0 / 4.1 weights still cap at 8K output.
+  if (m.startsWith("claude-opus-4-0") || m.startsWith("claude-opus-4-1") ||
+      m.includes("opus-4-20250514") || m.includes("opus-4-1-20250805")) return 8192;
+  // Claude 3.x family (legacy fallback).
+  if (m.startsWith("claude-3-")) return 8192;
+  // Default to 64K for 4.5+ family (opus-4-5/4-6/4-7, sonnet-4-5/4-6/4-7, haiku-4-5).
+  return 64000;
+}
+
+function render(snapshot) {
+  if (!snapshot || snapshot.kind !== "ok") {
+    const fallback = snapshot?.message || "У Claude Limit Meter ещё нет данных.";
+    applyStatus("$(circle-slash) cc-ctx ?", getTextColor(), `fallback:${fallback}`, () => fallback);
+    return;
+  }
+
+  const state = getState(snapshot.usedPercent);
+  const percent = Math.round(snapshot.usedPercent);
+  const showBar = vscode.workspace.getConfiguration("claudeLimitMeter").get("showBar", true);
+  const bar = showBar ? ` ${makeBar(snapshot.usedPercent)}` : "";
+  const text = `${state.dot} cc-ctx${bar} ${percent}%`;
+  const tooltipText = buildTooltipText(snapshot, state);
+  applyStatus(text, getTextColor(), tooltipText, () => makeTooltip(snapshot, state));
+}
+
+function applyStatus(text, color, tooltipKey, tooltipFactory) {
+  if (lastRenderedText !== text) {
+    statusItem.text = text;
+    lastRenderedText = text;
+  }
+  if (lastRenderedColor !== color) {
+    statusItem.color = color;
+    lastRenderedColor = color;
+  }
+  // Only reassign tooltip when its content actually changed. Reassigning .tooltip
+  // every tick triggers VS Code to close+reopen the open popup, which the user
+  // sees as blinking every updateIntervalSeconds. The key is a stable string
+  // representation of the tooltip content; the MarkdownString is built lazily
+  // only when we actually need to update.
+  if (lastTooltipKey !== tooltipKey) {
+    statusItem.tooltip = tooltipFactory();
+    lastTooltipKey = tooltipKey;
+  }
+}
+
+function getTextColor() {
+  return vscode.workspace.getConfiguration("claudeLimitMeter").get("textColor", "#1b003f");
+}
+
+function getState(percent) {
+  const config = vscode.workspace.getConfiguration("claudeLimitMeter");
+  const warn = config.get("warnPercent", 65);
+  const high = config.get("highPercent", 80);
+  const critical = config.get("criticalPercent", 90);
+
+  if (percent >= critical) {
+    return { name: "CRITICAL", dot: "🔴", color: "#ff2d2d" };
+  }
+  if (percent >= high) {
+    return { name: "HIGH", dot: "🟠", color: "#ff9f1a" };
+  }
+  if (percent >= warn) {
+    return { name: "WARM", dot: "🟡", color: "#ffe600" };
+  }
+  return { name: "OK", dot: "🟢", color: "#00ff66" };
+}
+
+function makeBar(percent) {
+  const length = vscode.workspace.getConfiguration("claudeLimitMeter").get("barLength", 8);
+  const clamped = Math.max(0, Math.min(100, percent));
+  const filled = Math.round((clamped / 100) * length);
+  return "▓".repeat(filled) + "░".repeat(Math.max(0, length - filled));
+}
+
+function buildTooltipParts(snapshot, state) {
+  const kickLabel = lastKickState ? (lastKickState.enabled ? "kick-on" : "kick-off") : "—";
+
+  const rawWin = snapshot.rawWindow || snapshot.windowSize;
+  const dataLines = [
+    `Статус:    ${state.name}`,
+    `Модель:    ${snapshot.model || "неизвестна"}`,
+    `Контекст:  ${formatInt(snapshot.contextTokens)} / ${formatInt(snapshot.windowSize)} (${snapshot.usedPercent.toFixed(1)}%)`,
+    `Окно:      ${formatInt(rawWin)} модель − ${formatInt(snapshot.maxOutput || 0)} ответ − 13 000 запас`,
+    `Остаток:   ${formatInt(snapshot.leftTokens)} токенов до auto-compact`
+  ];
+
+  const config = vscode.workspace.getConfiguration("claudeLimitMeter");
+  const agg = snapshot.aggregates || {};
+  const has5h = config.get("show5hUsage", true);
+  const hasWeek = config.get("showWeeklyUsage", true);
+  if (has5h || hasWeek) dataLines.push("");
+
+  if (has5h) {
+    const tokens5h = (agg.input5h || 0) + (agg.output5h || 0) + (agg.cache5h || 0);
+    dataLines.push(`Окно 5ч:   ${formatInt(agg.messages5h || 0)} сообщ., ${formatInt(tokens5h)} токенов, с ${formatClock(agg.block5hStartMs)}`);
+  }
+
+  if (hasWeek) {
+    const tokensWeek = (agg.inputWeek || 0) + (agg.outputWeek || 0) + (agg.cacheWeek || 0);
+    dataLines.push(`За неделю: ${formatInt(agg.messagesWeek || 0)} сообщ., ${formatInt(tokensWeek)} токенов, с ${formatDate(agg.weekStartMs)}`);
+  }
+
+  return { kickLabel, dataLines };
+}
+
+function buildTooltipText(snapshot, state) {
+  const { kickLabel, dataLines } = buildTooltipParts(snapshot, state);
+  const keyLines = dataLines.map((line) => line.replace(/, с .+$/, ""));
+  return `kick:${kickLabel}|data:${keyLines.join("\n")}`;
+}
+
+function makeTooltip(snapshot, state) {
+  const { kickLabel, dataLines } = buildTooltipParts(snapshot, state);
+  const markdown = new vscode.MarkdownString(undefined, true);
+  markdown.isTrusted = false;
+  markdown.appendCodeblock([
+    "Последний активный чат Claude Code.",
+    "Обновляется после ответа Claude.",
+    "Клик → claude.ai/settings/usage"
+  ].join("\n"));
+  markdown.appendMarkdown("\n");
+  markdown.appendMarkdown(`**Контекст Claude Code** — Хук: ${kickLabel}\n\n`);
+  markdown.appendCodeblock(dataLines.join("\n"));
+  return markdown;
+}
+
+async function toggleBar() {
+  const config = vscode.workspace.getConfiguration("claudeLimitMeter");
+  const current = config.get("showBar", true);
+  await config.update("showBar", !current, vscode.ConfigurationTarget.Global);
+  refresh();
+}
+
+async function openUsagePage() {
+  const url = vscode.workspace.getConfiguration("claudeLimitMeter").get("usagePageUrl", "https://claude.ai/settings/usage");
+  try {
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+  } catch (error) {
+    vscode.window.showErrorMessage(`Не удалось открыть страницу лимитов: ${error.message}`);
+  }
+}
+
+function formatClock(ms) {
+  if (!ms) return "—";
+  const date = new Date(ms);
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatDate(ms) {
+  if (!ms) return "—";
+  const date = new Date(ms);
+  return date.toLocaleDateString("ru-RU", { month: "short", day: "numeric" });
+}
+
+function formatInt(value) {
+  return Number(value || 0).toLocaleString("en-US");
+}
+
+// ---------- Self-cleanup of older sibling installs ----------
+
+function cleanupOlderInstalls(context) {
+  const ourPath = context.extensionPath;
+  const extensionsDir = path.dirname(ourPath);
+  const ourFolder = path.basename(ourPath);
+  const prefix = "local.claude-limit-meter-";
+  if (!ourFolder.startsWith(prefix)) return;
+  const ourVersion = ourFolder.substring(prefix.length);
+
+  let entries;
+  try {
+    entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.startsWith(prefix)) continue;
+    if (entry.name === ourFolder) continue;
+    const otherVersion = entry.name.substring(prefix.length);
+    if (compareSemver(otherVersion, ourVersion) >= 0) continue;
+    const fullPath = path.join(extensionsDir, entry.name);
+    try {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } catch {
+      // Sibling folder may be locked or already gone — ignore.
+    }
+  }
+}
+
+function compareSemver(a, b) {
+  const aParts = String(a).split(".").map((x) => parseInt(x, 10) || 0);
+  const bParts = String(b).split(".").map((x) => parseInt(x, 10) || 0);
+  const len = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < len; i++) {
+    const x = aParts[i] || 0;
+    const y = bParts[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+// ---------- Kick hook bundled installer ----------
+
+const KICK_FILES = [
+  { src: "kick-hook.js", dst: ["scripts", "kick-hook.js"] },
+  { src: "kick.md",      dst: ["commands", "kick.md"] },
+  { src: "kick-on.md",   dst: ["commands", "kick-on.md"] },
+  { src: "kick-off.md",  dst: ["commands", "kick-off.md"] }
+];
+
+function getKickPaths() {
+  const claudeDir = path.join(os.homedir(), ".claude");
+  return {
+    claudeDir,
+    settingsPath: path.join(claudeDir, "settings.json"),
+    markerPath:   path.join(claudeDir, ".kick-installed-version"),
+    scriptPath:   path.join(claudeDir, "scripts", "kick-hook.js")
+  };
+}
+
+function ensureKickArtifacts(context, { force }) {
+  const paths = getKickPaths();
+  const pkg = require(path.join(context.extensionPath, "package.json"));
+  const version = pkg.version;
+
+  if (!force) {
+    try {
+      const installed = fs.readFileSync(paths.markerPath, "utf8").trim();
+      if (installed === version) return; // already at this version, skip silently
+    } catch {
+      // No marker — fall through to install.
+    }
+  }
+
+  fs.mkdirSync(path.join(paths.claudeDir, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(paths.claudeDir, "commands"), { recursive: true });
+
+  for (const f of KICK_FILES) {
+    const srcPath = path.join(context.extensionPath, "resources", f.src);
+    const dstPath = path.join(paths.claudeDir, ...f.dst);
+    fs.copyFileSync(srcPath, dstPath);
+  }
+
+  patchSettingsJsonForKick(paths.settingsPath, paths.scriptPath);
+  fs.writeFileSync(paths.markerPath, version);
+}
+
+function patchSettingsJsonForKick(settingsPath, scriptPath) {
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  } catch {
+    // Missing or unparseable — start fresh.
+    settings = {};
+  }
+
+  if (!settings.hooks || typeof settings.hooks !== "object") settings.hooks = {};
+  if (!Array.isArray(settings.hooks.PostCompact)) settings.hooks.PostCompact = [];
+
+  const desiredCommand = `node ${scriptPath.replace(/\\/g, "/")}`;
+  const alreadyHasOurs = settings.hooks.PostCompact.some((entry) =>
+    Array.isArray(entry.hooks) && entry.hooks.some((h) =>
+      h && h.type === "command" && typeof h.command === "string" && h.command.includes("kick-hook.js")
+    )
+  );
+
+  if (!alreadyHasOurs) {
+    settings.hooks.PostCompact.push({
+      hooks: [{ type: "command", command: desiredCommand, timeout: 15 }]
+    });
+  } else {
+    // Update existing entry command to match current installation path (idempotent).
+    for (const entry of settings.hooks.PostCompact) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const h of entry.hooks) {
+        if (h && h.type === "command" && typeof h.command === "string" && h.command.includes("kick-hook.js")) {
+          h.command = desiredCommand;
+          if (!h.timeout) h.timeout = 15;
+        }
+      }
+    }
+  }
+
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+function uninstallKickArtifacts() {
+  const paths = getKickPaths();
+
+  for (const f of KICK_FILES) {
+    const dstPath = path.join(paths.claudeDir, ...f.dst);
+    try { fs.unlinkSync(dstPath); } catch {}
+  }
+  try { fs.unlinkSync(paths.markerPath); } catch {}
+  try { fs.unlinkSync(path.join(paths.claudeDir, ".kick-disabled")); } catch {}
+  try { fs.unlinkSync(path.join(paths.claudeDir, ".kick-log")); } catch {}
+
+  // Remove our hook entry from settings.json, preserving everything else.
+  try {
+    const settings = JSON.parse(fs.readFileSync(paths.settingsPath, "utf8"));
+    if (settings.hooks && Array.isArray(settings.hooks.PostCompact)) {
+      settings.hooks.PostCompact = settings.hooks.PostCompact.filter((entry) => {
+        if (!Array.isArray(entry.hooks)) return true;
+        return !entry.hooks.some((h) =>
+          h && h.type === "command" && typeof h.command === "string" && h.command.includes("kick-hook.js")
+        );
+      });
+      if (settings.hooks.PostCompact.length === 0) delete settings.hooks.PostCompact;
+      if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+      fs.writeFileSync(paths.settingsPath, JSON.stringify(settings, null, 2));
+    }
+  } catch {}
+}
+
+module.exports = {
+  activate,
+  deactivate
+};
