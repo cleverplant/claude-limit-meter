@@ -34,7 +34,8 @@ resources/
   kick-off.md                      — disable PostCompact auto-handoff
 README.md                          — English user-facing docs (also primary npm/marketplace text)
 README_ru.md                       — Russian user-facing docs
-claude-limit-meter-0.3.0.png       — screenshot used in both READMEs
+claude-limit-web.png               — quota panel screenshot used in both READMEs
+status-bar.png                     — status bar items screenshot used in both READMEs
 LICENSE                            — MIT
 .vscodeignore                      — controls what ships inside the .vsix
 .gitignore                         — controls what reaches the public repo
@@ -153,7 +154,7 @@ git check-ignore -v .env .secrets/git-askpass.ps1
 
 Both should report a match in `.gitignore`. If either does not, stop and fix the ignore — do not stage.
 
-`claude-limit-meter-0.3.0.png` (the README screenshot) is **not** secret and must be committed: README.md references it.
+`claude-limit-web.png` and `status-bar.png` (the README screenshots) are **not** secret and must be committed: both READMEs reference them.
 
 ---
 

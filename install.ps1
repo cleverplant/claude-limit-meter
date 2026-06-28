@@ -23,7 +23,8 @@ Copy-Item -LiteralPath (Join-Path $source "package.json") -Destination $target
 Copy-Item -LiteralPath (Join-Path $source "extension.js") -Destination $target
 Copy-Item -LiteralPath (Join-Path $source "README.md") -Destination $target
 Copy-Item -LiteralPath (Join-Path $source "README_ru.md") -Destination $target -ErrorAction SilentlyContinue
-Copy-Item -LiteralPath (Join-Path $source "claude-limit-meter-0.3.0.png") -Destination $target -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $source "claude-limit-web.png") -Destination $target -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $source "status-bar.png") -Destination $target -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $source "resources") -Destination $target -Recurse
 
 Write-Output "INSTALLED=$target"
