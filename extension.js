@@ -722,8 +722,7 @@ function resolveContextWindow(model, settingsModelInfo) {
   //                        Claude Code currently strips it before writing.
   //   "project-settings" — <chatCwd>/.claude/settings.json#model contains [1m].
   //   "global-settings"  — ~/.claude/settings.json#model contains [1m].
-  //   "known-1m"         — claude-sonnet-4-x / opus-4-x / haiku-4-x (all 1M).
-  //   "default"          — fallback 200K for older claude-* models.
+  //   "default"          — fallback 200K for any claude-* model.
   // Auto-overflow promotion is applied later in readLatestSnapshot, not here.
   const override = vscode.workspace.getConfiguration("claudeLimitMeter").get("contextWindowOverride", 0);
   if (override && override > 0) return { window: override, source: "override" };
@@ -740,14 +739,6 @@ function resolveContextWindow(model, settingsModelInfo) {
         settingsModel: settingsModelInfo.model
       };
     }
-  }
-
-  // Known 1M-window models (claude-sonnet-4-x and newer claude-4 family).
-  // claude-opus-4-x and claude-haiku-4-x also have 1M context windows.
-  if (rawLower.includes("claude-sonnet-4") ||
-      rawLower.includes("claude-opus-4") ||
-      rawLower.includes("claude-haiku-4")) {
-    return { window: 1000000, source: "known-1m" };
   }
 
   return { window: 200000, source: "default" };
