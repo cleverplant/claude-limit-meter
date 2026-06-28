@@ -2,7 +2,7 @@
   "name": "claude-limit-meter",
   "displayName": "Claude Limit Meter",
   "description": "Shows current Claude Code context pressure and 5h/weekly token usage in the VS Code status bar.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "local",
   "repository": {
     "type": "git",

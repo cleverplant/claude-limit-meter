@@ -4,6 +4,7 @@
 // Logs every fire to ~/.claude/.kick-log (used by status indicators).
 //
 // Output channel: systemMessage (UI display only — does NOT consume model tokens).
+// Output is a single fenced code block: copy it from the chat, paste into a new chat.
 
 const fs = require('fs');
 const path = require('path');
@@ -40,11 +41,14 @@ const clean = tracked === 0 ? 'clean' : 'dirty';
 const upstream = sh('git rev-parse --abbrev-ref --symbolic-full-name @{u}');
 const aheadBehind = upstream ? sh(`git rev-list --left-right --count ${upstream}...HEAD`) : '';
 
-// 5. plan.md parse (best-effort, no LLM).
-let stage = '(see plans/plan.md)';
-let nextStep = '(see plans/plan.md or recent commits)';
+// 5. Project file presence + plan.md parse (best-effort, no LLM).
+const hasClaudeMd = fs.existsSync(path.join(cwd, 'CLAUDE.md'));
 const planPath = path.join(cwd, 'plans', 'plan.md');
-if (fs.existsSync(planPath)) {
+const hasPlan = fs.existsSync(planPath);
+
+let stage = null;
+let nextStep = null;
+if (hasPlan) {
   const plan = fs.readFileSync(planPath, 'utf8');
   const focusMatch = plan.match(/##\s*([^\n]*(?:Current Focus|Текущий фокус)[^\n]*)/i);
   if (focusMatch) stage = focusMatch[1].trim();
@@ -58,62 +62,49 @@ if (fs.existsSync(planPath)) {
   }
 }
 
-// 6. Latest isCompactSummary from current session's JSONL.
-const encoded = cwd.replace(/[\\/:]/g, '-');
-const projDir = path.join(HOME, '.claude', 'projects', encoded);
-let summaryText = null;
-let summaryAge = null;
-if (fs.existsSync(projDir)) {
-  const files = fs.readdirSync(projDir).filter(f => f.endsWith('.jsonl'))
-    .map(f => ({ f, m: fs.statSync(path.join(projDir, f)).mtimeMs }))
-    .sort((a, b) => b.m - a.m);
-  if (files.length) {
-    const lines = fs.readFileSync(path.join(projDir, files[0].f), 'utf8').split('\n').filter(Boolean);
-    let last = null;
-    for (const ln of lines) {
-      try {
-        const o = JSON.parse(ln);
-        if (o.isCompactSummary && o.message) {
-          const c = o.message.content;
-          const text = typeof c === 'string' ? c
-            : (Array.isArray(c) ? c.map(p => p.text || '').join('\n') : JSON.stringify(c));
-          const ts = o.timestamp ? Date.parse(o.timestamp) : null;
-          last = { text, ts };
-        }
-      } catch (e) {}
-    }
-    if (last) {
-      summaryText = last.text;
-      summaryAge = last.ts ? Math.round((Date.now() - last.ts) / 60000) : null;
-    }
-  }
-}
+// 6. Build handoff text.
+//    Single fenced code block — the chat UI renders it with a copy button.
+//    No project history, no JSONL summary, no per-file gymnastics.
+//    The new chat is told: if the user pastes a summary above this prompt, use it; otherwise continue.
+const readTargets = [];
+if (hasClaudeMd) readTargets.push('CLAUDE.md');
+if (hasPlan) readTargets.push('plans/plan.md');
+const readLine = readTargets.length
+  ? `Read ${readTargets.join(', ')}.`
+  : 'No CLAUDE.md or plans/plan.md in this project — derive context from recent commits.';
 
-// 7. Build handoff text.
-const blockTargeted =
+const stageLine = stage
+  ? `We are at: ${stage}.`
+  : (hasPlan ? 'We are at: (Current Focus not found in plan.md — derive from recent commits).'
+             : 'We are at: (no plan file — derive from recent commits).');
+
+const nextLine = nextStep
+  ? `Continue from: ${nextStep}.`
+  : 'Continue from: nearest concrete next step inferable from recent commits.';
+
+const destructiveRule = hasClaudeMd
+  ? '- Destructive git commands (push, reset --hard, rm) require explicit approval per CLAUDE.md §17.2.'
+  : '- Destructive git commands (push, reset --hard, rm) require explicit user approval.';
+
+const block =
   '```\n' +
-  'Read CLAUDE.md, plans/plan.md.\n\n' +
-  `We are at: ${stage}.\n\n` +
-  `Continue from: ${nextStep}.\n\n` +
+  readLine + '\n\n' +
+  stageLine + '\n\n' +
+  nextLine + '\n\n' +
+  'If the user pasted a post-compact summary above this prompt, use it for deeper context. ' +
+  'If not, continue without it — do not ask for one.\n\n' +
   'Constraints:\n' +
   '- Do not widen architecture beyond the task.\n' +
   '- Do not start large refactors without explicit request.\n' +
-  '- Destructive git commands (push, reset --hard, rm) require explicit approval per CLAUDE.md §17.2.\n\n' +
+  destructiveRule + '\n\n' +
   `Current git state: branch ${branch}` +
   (aheadBehind ? ` (${aheadBehind.replace('\t', ' behind / ')} ahead)` : '') +
   `, ${clean}, last commit ${lastCommit}.\n` +
   '```';
 
-let handoff = '🔄 /kick auto (PostCompact) — handoff готов:\n\n' + blockTargeted;
+const handoff = '🔄 /kick auto (PostCompact) — скопируй промпт ниже в новый чат:\n\n' + block;
 
-if (summaryText) {
-  const ageStr = summaryAge !== null ? `${summaryAge} мин` : 'unknown';
-  handoff += '\n\nПолный контекст (post-compact summary, возраст: ' + ageStr + '):\n\n```\n' + summaryText + '\n```';
-} else {
-  handoff += '\n\n(post-compact summary не найден в JSONL — handoff только targeted-блоком)';
-}
-
-// 8. Log fire with rotation — keep at most LOG_MAX_LINES most recent entries.
+// 7. Log fire with rotation — keep at most LOG_MAX_LINES most recent entries.
 const LOG_MAX_LINES = 50;
 try {
   const newLine = new Date().toISOString() + ' fired cwd=' + cwd + '\n';
@@ -124,5 +115,5 @@ try {
   fs.writeFileSync(LOG, kept.join('\n') + '\n');
 } catch (e) {}
 
-// 9. Emit as systemMessage (UI only, no model-token cost).
+// 8. Emit as systemMessage (UI only, no model-token cost).
 process.stdout.write(JSON.stringify({ systemMessage: handoff }));
