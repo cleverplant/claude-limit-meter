@@ -1,6 +1,6 @@
 # Claude Limit Meter
 
-[Download VSIX v0.3.7](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.7/claude-limit-meter-0.3.7.vsix) | [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.7)
+[Download VSIX v0.3.8](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.8/claude-limit-meter-0.3.8.vsix) | [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.8)
 
 ![Claude Limit Meter status bar and tooltip](claude-limit-meter-0.3.0.png)
 
@@ -10,6 +10,19 @@ Local VS Code extension that shows current Claude Code context pressure and
 rolling 5-hour / weekly token usage in the status bar. Bundles a PostCompact
 auto-handoff hook (`/kick auto`) for Claude Code, installed automatically on
 extension activation.
+
+## What's new in 0.3.8
+
+- **Fix: the 0.3.7 overflow safety net is removed.** It promoted a
+  200K-mode session to 1M whenever the cumulative
+  `cache_read_input_tokens` value from the latest JSONL assistant
+  message exceeded the 200K effective window. That number accumulates
+  across messages and does not reflect live context size, so the
+  heuristic produced a false `1,000,000 (auto-detect по объёму)`
+  reading while Claude Code's own panel showed 200K. The meter now
+  trusts only `~/.claude/settings.json` / project `.claude/settings.json`
+  / the configured override for window detection — exactly the
+  channels documented as authoritative for 1M-beta opt-in.
 
 ## What's new in 0.3.7
 
@@ -25,11 +38,6 @@ extension activation.
   global. Tooltip now shows where the window came from:
   `Окно: 1 000 000 (~/.claude/settings.json: opus[1m]) − 64 000 ответ
   − 13 000 запас`.
-- **Overflow safety net.** If observed context tokens exceed the
-  computed 200K effective window while the meter is still defaulted to
-  200K, it auto-promotes to 1M for that session and labels the source
-  as `(auto-detect по объёму)` in the tooltip. Catches exotic switches
-  not visible in JSONL or settings.json.
 - **Documentation: `/kick` hook explained for users.** Both READMEs now
   carry a user-oriented section near the indicator description
   explaining what the `/kick` PostCompact hook does, the `/kick`,

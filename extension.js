@@ -215,20 +215,10 @@ function readLatestSnapshot() {
   const settingsModelInfo = readClaudeSettingsModel(best.cwd);
   const windowInfo = resolveContextWindow(best.model, settingsModelInfo);
   const maxOutput = resolveMaxOutput(best.model);
-  let rawWindow = windowInfo.window;
-  let windowSource = windowInfo.source;
-  let settingsModel = windowInfo.settingsModel;
-  let windowSize = Math.max(1, rawWindow - maxOutput - 13000);
-
-  // Safety net: if actually-observed context exceeds the computed effective window
-  // by a clear margin while we're still at the 200K default, promote to 1M. Catches
-  // exotic switches not visible in JSONL or settings.json (e.g. per-session /model).
-  if (rawWindow === 200000 && contextTokens > windowSize) {
-    rawWindow = 1000000;
-    windowSize = Math.max(1, rawWindow - maxOutput - 13000);
-    windowSource = "auto-overflow";
-    settingsModel = undefined;
-  }
+  const rawWindow = windowInfo.window;
+  const windowSource = windowInfo.source;
+  const settingsModel = windowInfo.settingsModel;
+  const windowSize = Math.max(1, rawWindow - maxOutput - 13000);
 
   const usedPercent = (contextTokens / windowSize) * 100;
   const leftTokens = Math.max(0, windowSize - contextTokens);
@@ -691,8 +681,6 @@ function formatWindowSource(snapshot) {
       return `(.claude/settings.json: ${snapshot.settingsModel})`;
     case "global-settings":
       return `(~/.claude/settings.json: ${snapshot.settingsModel})`;
-    case "auto-overflow":
-      return "(auto-detect по объёму)";
     case "default":
     default:
       return "модель";

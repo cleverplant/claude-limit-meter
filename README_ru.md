@@ -1,6 +1,6 @@
 # Claude Limit Meter — описание (RU)
 
-[Скачать VSIX v0.3.7](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.7/claude-limit-meter-0.3.7.vsix) | [Описание релиза](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.7)
+[Скачать VSIX v0.3.8](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.8/claude-limit-meter-0.3.8.vsix) | [Описание релиза](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.8)
 
 ![Claude Limit Meter — индикатор в status bar и tooltip](claude-limit-meter-0.3.0.png)
 
@@ -18,6 +18,19 @@ Claude Code — отдельно ставить ничего не нужно.
 
 ---
 
+## Изменения в 0.3.8
+
+- **Фикс: убран overflow safety net из 0.3.7.** В 0.3.7 эвристика
+  поднимала окно сессии с 200K до 1M, если суммарный
+  `cache_read_input_tokens` из последнего assistant-сообщения JSONL
+  превышал расчётное 200K-окно. Но это число — кумулятивное по
+  истории и не отражает реальный текущий размер контекста, поэтому
+  расширение ложно показывало `1 000 000 (auto-detect по объёму)` при
+  том, что собственная панель Claude Code показывала 200K. Теперь
+  для определения окна доверяемся только `~/.claude/settings.json` /
+  project `.claude/settings.json` / настроенному override — это
+  единственные документированные источники истины для 1M-beta.
+
 ## Изменения в 0.3.7
 
 - **Авто-определение 1M-режима Opus / Sonnet.** В ранних версиях
@@ -32,12 +45,6 @@ Claude Code — отдельно ставить ничего не нужно.
   глобальными. В tooltip теперь явно видно, откуда взялось окно:
   `Окно: 1 000 000 (~/.claude/settings.json: opus[1m]) − 64 000 ответ
   − 13 000 запас`.
-- **Overflow safety net.** Если фактически наблюдаемые токены
-  контекста превысили расчётное 200K-окно (а индикатор всё ещё
-  считает по 200K), расширение автоматически промотит окно до 1M для
-  этой сессии и подпишет источник в tooltip как
-  `(auto-detect по объёму)`. Страхует от экзотических переключений,
-  не видимых ни в JSONL, ни в `settings.json`.
 - **Документация: хук `/kick` для пользователя.** В обоих README
   рядом с описанием индикаторов появилась user-oriented секция: что
   делает PostCompact-хук `/kick auto`, для чего нужен, как работают
