@@ -15,6 +15,7 @@ let lastKickText;
 let lastKickColor;
 let lastKickVisible;
 const fileEventCache = new Map();
+const settingsModelCache = new Map();
 
 let extensionContext;
 
@@ -74,6 +75,7 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration("claudeLimitMeter")) {
       fileEventCache.clear();
+      settingsModelCache.clear();
       lastRenderedText = undefined;
       lastRenderedColor = undefined;
       lastTooltipKey = undefined;
@@ -210,9 +212,24 @@ function readLatestSnapshot() {
   // Match Claude Code's own status-line formula: effective context window is
   // `model_window − maxOutputTokens − 13000` (auto-compact safety margin).
   // Source: anthropic.claude-code webview bundle, vXe() in 2.1.187.
-  const rawWindow = resolveContextWindow(best.model);
+  const settingsModelInfo = readClaudeSettingsModel(best.cwd);
+  const windowInfo = resolveContextWindow(best.model, settingsModelInfo);
   const maxOutput = resolveMaxOutput(best.model);
-  const windowSize = Math.max(1, rawWindow - maxOutput - 13000);
+  let rawWindow = windowInfo.window;
+  let windowSource = windowInfo.source;
+  let settingsModel = windowInfo.settingsModel;
+  let windowSize = Math.max(1, rawWindow - maxOutput - 13000);
+
+  // Safety net: if actually-observed context exceeds the computed effective window
+  // by a clear margin while we're still at the 200K default, promote to 1M. Catches
+  // exotic switches not visible in JSONL or settings.json (e.g. per-session /model).
+  if (rawWindow === 200000 && contextTokens > windowSize) {
+    rawWindow = 1000000;
+    windowSize = Math.max(1, rawWindow - maxOutput - 13000);
+    windowSource = "auto-overflow";
+    settingsModel = undefined;
+  }
+
   const usedPercent = (contextTokens / windowSize) * 100;
   const leftTokens = Math.max(0, windowSize - contextTokens);
 
@@ -231,6 +248,8 @@ function readLatestSnapshot() {
     contextTokens,
     windowSize,
     rawWindow,
+    windowSource,
+    settingsModel,
     maxOutput,
     usedPercent,
     leftTokens,
@@ -294,6 +313,7 @@ function readLastAssistantUsage(file) {
           timestamp: event.timestamp,
           model: msg.model,
           sessionId: event.sessionId,
+          cwd: event.cwd,
           usage: msg.usage
         };
       } catch {
@@ -424,16 +444,75 @@ function computeWeekStartMs(nowMs) {
   return d.getTime();
 }
 
-function resolveContextWindow(model) {
+function resolveContextWindow(model, settingsModelInfo) {
+  // Returns { window, source, settingsModel? }. Sources, in priority order:
+  //   "override"         — manual claudeLimitMeter.contextWindowOverride.
+  //   "jsonl-suffix"     — model name in JSONL already contains [1m]. Rare;
+  //                        Claude Code currently strips it before writing.
+  //   "project-settings" — <chatCwd>/.claude/settings.json#model contains [1m].
+  //   "global-settings"  — ~/.claude/settings.json#model contains [1m].
+  //   "default"          — fallback 200K for any claude-* family.
+  // Auto-overflow promotion is applied later in readLatestSnapshot, not here.
   const override = vscode.workspace.getConfiguration("claudeLimitMeter").get("contextWindowOverride", 0);
-  if (override && override > 0) return override;
+  if (override && override > 0) return { window: override, source: "override" };
 
-  if (!model || typeof model !== "string") return 200000;
-  const m = model.toLowerCase();
-  // Claude 4.x and 3.x families default to 200K. Sonnet 4.x can run at 1M with the [1m] beta header.
-  if (m.includes("[1m]")) return 1000000;
-  if (m.startsWith("claude-")) return 200000;
-  return 200000;
+  const rawLower = (typeof model === "string" ? model : "").toLowerCase();
+  if (rawLower.includes("[1m]")) return { window: 1000000, source: "jsonl-suffix" };
+
+  if (settingsModelInfo && typeof settingsModelInfo.model === "string") {
+    const settingsLower = settingsModelInfo.model.toLowerCase();
+    if (settingsLower.includes("[1m]")) {
+      return {
+        window: 1000000,
+        source: settingsModelInfo.source === "project" ? "project-settings" : "global-settings",
+        settingsModel: settingsModelInfo.model
+      };
+    }
+  }
+
+  return { window: 200000, source: "default" };
+}
+
+function readClaudeSettingsModel(chatCwd) {
+  // Pick up the user's "model" setting from Claude Code's settings.json. Project
+  // override takes precedence over global. Cached per-file by mtime+size so this
+  // is cheap on every refresh tick.
+  const candidates = [];
+  if (chatCwd && typeof chatCwd === "string") {
+    candidates.push({ path: path.join(chatCwd, ".claude", "settings.json"), source: "project" });
+  }
+  candidates.push({ path: path.join(getClaudeHome(), "settings.json"), source: "global" });
+
+  for (const c of candidates) {
+    const model = readSettingsModelFile(c.path);
+    if (model) return { model, source: c.source, path: c.path };
+  }
+  return undefined;
+}
+
+function readSettingsModelFile(filePath) {
+  const stat = safeStat(filePath);
+  if (!stat) {
+    settingsModelCache.delete(filePath);
+    return undefined;
+  }
+  const cached = settingsModelCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.model;
+  }
+  let model;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (parsed && typeof parsed.model === "string") model = parsed.model;
+  } catch {
+    // Unparseable settings.json — treat as no signal.
+  }
+  settingsModelCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, model });
+  if (settingsModelCache.size > 32) {
+    const firstKey = settingsModelCache.keys().next().value;
+    settingsModelCache.delete(firstKey);
+  }
+  return model;
 }
 
 function resolveMaxOutput(model) {
@@ -521,11 +600,12 @@ function buildTooltipParts(snapshot, state) {
   const kickLabel = lastKickState ? (lastKickState.enabled ? "kick-on" : "kick-off") : "—";
 
   const rawWin = snapshot.rawWindow || snapshot.windowSize;
+  const windowLabel = formatWindowSource(snapshot);
   const dataLines = [
     `Статус:    ${state.name}`,
     `Модель:    ${snapshot.model || "неизвестна"}`,
     `Контекст:  ${formatInt(snapshot.contextTokens)} / ${formatInt(snapshot.windowSize)} (${snapshot.usedPercent.toFixed(1)}%)`,
-    `Окно:      ${formatInt(rawWin)} модель − ${formatInt(snapshot.maxOutput || 0)} ответ − 13 000 запас`,
+    `Окно:      ${formatInt(rawWin)} ${windowLabel} − ${formatInt(snapshot.maxOutput || 0)} ответ − 13 000 запас`,
     `Остаток:   ${formatInt(snapshot.leftTokens)} токенов до auto-compact`
   ];
 
@@ -599,6 +679,24 @@ function formatDate(ms) {
 
 function formatInt(value) {
   return Number(value || 0).toLocaleString("en-US");
+}
+
+function formatWindowSource(snapshot) {
+  switch (snapshot.windowSource) {
+    case "override":
+      return "(override)";
+    case "jsonl-suffix":
+      return "модель [1m]";
+    case "project-settings":
+      return `(.claude/settings.json: ${snapshot.settingsModel})`;
+    case "global-settings":
+      return `(~/.claude/settings.json: ${snapshot.settingsModel})`;
+    case "auto-overflow":
+      return "(auto-detect по объёму)";
+    case "default":
+    default:
+      return "модель";
+  }
 }
 
 // ---------- Self-cleanup of older sibling installs ----------
