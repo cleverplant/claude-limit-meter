@@ -25,6 +25,7 @@ Copy-Item -LiteralPath (Join-Path $source "README.md") -Destination $target
 Copy-Item -LiteralPath (Join-Path $source "README_ru.md") -Destination $target -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $source "claude-limit-web.png") -Destination $target -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $source "status-bar.png") -Destination $target -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $source "icon.png") -Destination $target -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $source "resources") -Destination $target -Recurse
 
 Write-Output "INSTALLED=$target"

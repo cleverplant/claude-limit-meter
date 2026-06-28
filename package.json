@@ -13,6 +13,7 @@
   },
   "homepage": "https://github.com/cleverplant/claude-limit-meter#readme",
   "license": "MIT",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.96.0"
   },
