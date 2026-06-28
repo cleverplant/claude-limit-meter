@@ -1,6 +1,6 @@
 # Claude Limit Meter
 
-[Download VSIX v0.3.8](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.8/claude-limit-meter-0.3.8.vsix) | [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.8)
+[Download VSIX v0.3.9](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.9/claude-limit-meter-0.3.9.vsix) | [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.9)
 
 ![Claude Limit Meter status bar and tooltip](claude-limit-meter-0.3.0.png)
 
@@ -10,6 +10,15 @@ Local VS Code extension that shows current Claude Code context pressure and
 rolling 5-hour / weekly token usage in the status bar. Bundles a PostCompact
 auto-handoff hook (`/kick auto`) for Claude Code, installed automatically on
 extension activation.
+
+## What's new in 0.3.9
+
+- **Fix: `claude-sonnet-4-6` (and all claude-4 family models) now correctly
+  report a 1 000 000-token context window.** Previous versions returned 200K
+  as the default fallback for any model not explicitly listed. The
+  `resolveContextWindow()` function now recognises `claude-sonnet-4-x`,
+  `claude-opus-4-x`, and `claude-haiku-4-x` by name and returns 1M without
+  requiring a `[1m]` suffix in settings.
 
 ## What's new in 0.3.8
 

@@ -2,7 +2,7 @@
   "name": "claude-limit-meter",
   "displayName": "Claude Limit Meter",
   "description": "Shows current Claude Code context pressure and 5h/weekly token usage in the VS Code status bar.",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "publisher": "local",
   "repository": {
     "type": "git",
@@ -48,6 +48,10 @@
       {
         "command": "claudeLimitMeter.uninstallKickHook",
         "title": "Claude Limit Meter: Uninstall Kick Hook"
+      },
+      {
+        "command": "claudeLimitMeter.showLimit",
+        "title": "Claude Limit Meter: Show Quota Limits"
       }
     ],
     "configuration": {

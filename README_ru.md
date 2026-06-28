@@ -1,6 +1,6 @@
 # Claude Limit Meter — описание (RU)
 
-[Скачать VSIX v0.3.8](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.8/claude-limit-meter-0.3.8.vsix) | [Описание релиза](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.8)
+[Скачать VSIX v0.3.9](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.3.9/claude-limit-meter-0.3.9.vsix) | [Описание релиза](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.3.9)
 
 ![Claude Limit Meter — индикатор в status bar и tooltip](claude-limit-meter-0.3.0.png)
 
@@ -17,6 +17,15 @@ Claude Code — отдельно ставить ничего не нужно.
 читает локальные `.jsonl`-логи сессий Claude Code и показывает индикатор.
 
 ---
+
+## Изменения в 0.3.9
+
+- **Фикс: `claude-sonnet-4-6` (и все модели семейства claude-4) теперь
+  корректно показывают контекстное окно 1 000 000 токенов.** В предыдущих
+  версиях любая модель без явного суффикса `[1m]` в settings получала
+  значение по умолчанию 200K. Функция `resolveContextWindow()` теперь
+  распознаёт `claude-sonnet-4-x`, `claude-opus-4-x` и `claude-haiku-4-x`
+  по имени и возвращает 1M без каких-либо ручных настроек.
 
 ## Изменения в 0.3.8
 
