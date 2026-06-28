@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { spawn } = require("child_process");
 
 let statusItem;
 let kickItem;
@@ -236,6 +237,38 @@ async function fetchQuotaData() {
 
 // ---------- Context (/context via CLI) ----------
 
+function parseContextOutput(text) {
+  const result = { model: "", used: "", total: "", pct: 0, categories: [] };
+  const modelM = text.match(/\*\*Model:\*\*\s*(.+)/);
+  if (modelM) result.model = modelM[1].trim();
+  const tokM = text.match(/\*\*Tokens:\*\*\s*([\d.]+k?)\s*\/\s*([\d.]+k?)\s*\((\d+)%\)/);
+  if (tokM) { result.used = tokM[1]; result.total = tokM[2]; result.pct = parseInt(tokM[3]); }
+  const rowRe = /\|\s*([^|\-][^|]*?)\s*\|\s*([\d.,]+k?)\s*\|\s*([\d.]+%)\s*\|/g;
+  let m;
+  while ((m = rowRe.exec(text)) !== null) {
+    const name = m[1].trim();
+    if (name.toLowerCase() === "category") continue;
+    result.categories.push({ name, tokens: m[2], pct: m[3] });
+  }
+  return result;
+}
+
+async function fetchContextData(cwd) {
+  const wrapExe = "C:\\Tools\\claude-wrap.exe";
+  return new Promise((resolve, reject) => {
+    const proc = spawn(wrapExe, [], { cwd, timeout: 20000 });
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", d => { stdout += d; });
+    proc.stderr.on("data", d => { stderr += d; });
+    proc.on("error", reject);
+    proc.on("close", code => {
+      if (!stdout && code !== 0) return reject(new Error(`exit ${code}: ${stderr.slice(0, 200)}`));
+      resolve(parseContextOutput(stdout));
+    });
+    proc.stdin.write("/context\n");
+    proc.stdin.end();
+  });
+}
 
 function fmtResetTime(isoStr) {
   if (!isoStr) return "—";
@@ -251,7 +284,7 @@ function barHtml(pct, height = 14) {
   </div>`;
 }
 
-function buildFullHtml({ quotaData, planName }) {
+function buildFullHtml({ quotaData, planName, workspaceFolders, defaultCwd, contextData, contextError, contextLoading }) {
   const fh = quotaData.five_hour || {};
   const sd = quotaData.seven_day || {};
   const fhPct = Math.round(fh.utilization ?? 0);
@@ -260,6 +293,40 @@ function buildFullHtml({ quotaData, planName }) {
   const sdReset = fmtResetTime(sd.resets_at);
   const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const planBadge = planName ? `<span style="font-weight:400;font-size:12px;opacity:.75;margin-left:8px">${planName}</span>` : "";
+
+  const folderOptions = workspaceFolders.map(f =>
+    `<option value="${f.uri.fsPath}" ${f.uri.fsPath === defaultCwd ? "selected" : ""}>${path.basename(f.uri.fsPath)}</option>`
+  ).join("");
+
+  let ctxHtml = "";
+  if (contextLoading) {
+    ctxHtml = `<div style="opacity:.6;font-size:12px">Загрузка контекста…</div>`;
+  } else if (contextError) {
+    ctxHtml = `<div style="color:#e05252;font-size:12px">Ошибка: ${contextError}</div>`;
+  } else if (contextData) {
+    const catColors = {
+      "system prompt": "#e07040", "system tools": "#4090e0", "memory files": "#40b870",
+      "skills": "#c07030", "messages": "#a060d0", "autocompact buffer": "#e05252", "free space": "#555"
+    };
+    const catRows = contextData.categories.map(c => {
+      const col = catColors[c.name.toLowerCase()] || "#888";
+      return `<tr>
+        <td style="padding:2px 8px 2px 0;opacity:.85">${c.name}</td>
+        <td style="padding:2px 8px 2px 0;text-align:right;font-variant-numeric:tabular-nums">${c.tokens}</td>
+        <td style="padding:2px 0;text-align:right;opacity:.65">${c.pct}</td>
+        <td style="padding:2px 0 2px 8px;width:80px">
+          <div style="background:#2a2a2a;border-radius:2px;height:6px;width:100%">
+            <div style="background:${col};width:${c.pct};height:100%;border-radius:2px"></div>
+          </div>
+        </td>
+      </tr>`;
+    }).join("");
+    ctxHtml = `
+      <div style="font-size:11px;opacity:.7;margin-bottom:2px">${contextData.model} &nbsp;·&nbsp; ${contextData.used} / ${contextData.total}</div>
+      ${barHtml(contextData.pct, 12)}
+      <div style="font-weight:700;font-size:22px;margin-bottom:10px">${contextData.pct}%</div>
+      <table style="font-size:11px;border-collapse:collapse;width:100%">${catRows}</table>`;
+  }
 
   return `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);font-size:13px;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);padding:16px;margin:0;min-width:300px">
 
@@ -279,6 +346,17 @@ ${barHtml(sdPct)}
   Квота запрашивается с серверов Anthropic и кешируется на 5 минут. Повторный клик на «limit» возвращает те же данные без нового запроса. Кнопка ↺ Обновить принудительно запрашивает свежие данные.
 </div>
 
+<hr style="border:none;border-top:1px solid #444;margin:14px 0">
+
+<div style="font-weight:600;font-size:14px;margin-bottom:10px">Контекст проекта</div>
+<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+  <select id="cwd-select" style="flex:1;background:var(--vscode-dropdown-background);color:var(--vscode-dropdown-foreground);border:1px solid var(--vscode-dropdown-border);border-radius:3px;padding:4px 6px;font-size:12px">
+    ${folderOptions}
+  </select>
+  <button id="btn-ctx" onclick="loadContext()" style="background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:none;border-radius:3px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap">/context</button>
+</div>
+<div id="ctx-result">${ctxHtml}</div>
+
 <script>
   const vscode = acquireVsCodeApi();
   function refreshQuota() {
@@ -286,14 +364,55 @@ ${barHtml(sdPct)}
     document.getElementById('btn-quota').disabled = true;
     vscode.postMessage({ command: 'refresh' });
   }
+  function loadContext() {
+    const cwd = document.getElementById('cwd-select').value;
+    document.getElementById('btn-ctx').textContent = '…';
+    document.getElementById('btn-ctx').disabled = true;
+    document.getElementById('ctx-result').innerHTML = '<div style="opacity:.6;font-size:12px">Загрузка контекста…</div>';
+    vscode.postMessage({ command: 'context', cwd });
+  }
   function toggleHelp() {
     const h = document.getElementById('help');
     h.style.display = h.style.display === 'none' ? 'block' : 'none';
   }
+  window.addEventListener('message', e => {
+    const msg = e.data;
+    if (msg.command === 'contextResult') {
+      const btn = document.getElementById('btn-ctx');
+      btn.textContent = '/context'; btn.disabled = false;
+      document.getElementById('ctx-result').innerHTML = msg.html;
+    }
+  });
 </script>
 </body></html>`;
 }
 
+function buildContextResultHtml(contextData) {
+  const catColors = {
+    "system prompt": "#e07040", "system tools": "#4090e0", "memory files": "#40b870",
+    "skills": "#c07030", "messages": "#a060d0", "autocompact buffer": "#e05252", "free space": "#555"
+  };
+  const catRows = contextData.categories.map(c => {
+    const col = catColors[c.name.toLowerCase()] || "#888";
+    return `<tr>
+      <td style="padding:2px 8px 2px 0;opacity:.85">${c.name}</td>
+      <td style="padding:2px 8px 2px 0;text-align:right;font-variant-numeric:tabular-nums">${c.tokens}</td>
+      <td style="padding:2px 0;text-align:right;opacity:.65">${c.pct}</td>
+      <td style="padding:2px 0 2px 8px;width:80px">
+        <div style="background:#2a2a2a;border-radius:2px;height:6px;width:100%">
+          <div style="background:${col};width:${c.pct};height:100%;border-radius:2px"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+  return `
+    <div style="font-size:11px;opacity:.7;margin-bottom:2px">${contextData.model} &nbsp;·&nbsp; ${contextData.used} / ${contextData.total}</div>
+    <div style="background:#2a2a2a;border-radius:4px;height:12px;width:100%;margin:4px 0 8px">
+      <div style="background:${contextData.pct >= 90 ? "#e05252" : contextData.pct >= 65 ? "#e0a030" : "#4caf82"};width:${contextData.pct}%;height:100%;border-radius:4px;transition:width .4s"></div>
+    </div>
+    <div style="font-weight:700;font-size:22px;margin-bottom:10px">${contextData.pct}%</div>
+    <table style="font-size:11px;border-collapse:collapse;width:100%">${catRows}</table>`;
+}
 
 function buildLimitErrorHtml(message) {
   return `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background)">
@@ -310,19 +429,30 @@ async function showLimitPanel() {
     { enableScripts: true, retainContextWhenHidden: false }
   );
 
+  const folders = vscode.workspace.workspaceFolders || [];
+  const defaultCwd = folders[0]?.uri.fsPath || os.homedir();
+
   async function load(forceRefresh) {
     if (forceRefresh) { limitCache = null; planCache = null; }
     panel.webview.html = `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:16px;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background)">Загрузка…</body></html>`;
     try {
       const [quotaData, planName] = await Promise.all([fetchQuotaData(), fetchPlanName().catch(() => "")]);
-      panel.webview.html = buildFullHtml({ quotaData, planName });
+      panel.webview.html = buildFullHtml({ quotaData, planName, workspaceFolders: folders, defaultCwd });
     } catch (err) {
       panel.webview.html = buildLimitErrorHtml(err.message);
     }
   }
 
-  panel.webview.onDidReceiveMessage((msg) => {
-    if (msg.command === "refresh") { load(true); }
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    if (msg.command === "refresh") { load(true); return; }
+    if (msg.command === "context") {
+      try {
+        const ctx = await fetchContextData(msg.cwd);
+        panel.webview.postMessage({ command: "contextResult", html: buildContextResultHtml(ctx) });
+      } catch (err) {
+        panel.webview.postMessage({ command: "contextResult", html: `<div style="color:#e05252;font-size:12px">Ошибка: ${err.message}</div>` });
+      }
+    }
   });
 
   load(false);
@@ -592,7 +722,8 @@ function resolveContextWindow(model, settingsModelInfo) {
   //                        Claude Code currently strips it before writing.
   //   "project-settings" — <chatCwd>/.claude/settings.json#model contains [1m].
   //   "global-settings"  — ~/.claude/settings.json#model contains [1m].
-  //   "default"          — fallback 200K for any claude-* model.
+  //   "known-1m"         — claude-sonnet-4-x / opus-4-x / haiku-4-x (all 1M).
+  //   "default"          — fallback 200K for older claude-* models.
   // Auto-overflow promotion is applied later in readLatestSnapshot, not here.
   const override = vscode.workspace.getConfiguration("claudeLimitMeter").get("contextWindowOverride", 0);
   if (override && override > 0) return { window: override, source: "override" };
@@ -609,6 +740,14 @@ function resolveContextWindow(model, settingsModelInfo) {
         settingsModel: settingsModelInfo.model
       };
     }
+  }
+
+  // Known 1M-window models (claude-sonnet-4-x and newer claude-4 family).
+  // claude-opus-4-x and claude-haiku-4-x also have 1M context windows.
+  if (rawLower.includes("claude-sonnet-4") ||
+      rawLower.includes("claude-opus-4") ||
+      rawLower.includes("claude-haiku-4")) {
+    return { window: 1000000, source: "known-1m" };
   }
 
   return { window: 200000, source: "default" };
@@ -776,18 +915,7 @@ function buildTooltipText(snapshot, state) {
 }
 
 function makeTooltip(snapshot, state) {
-  const { kickLabel, dataLines } = buildTooltipParts(snapshot, state);
-  const markdown = new vscode.MarkdownString(undefined, true);
-  markdown.isTrusted = false;
-  markdown.appendCodeblock([
-    "Последний активный чат Claude Code.",
-    "Обновляется после ответа Claude.",
-    "Клик → claude.ai/settings/usage"
-  ].join("\n"));
-  markdown.appendMarkdown("\n");
-  markdown.appendMarkdown(`**Контекст Claude Code** — Хук: ${kickLabel}\n\n`);
-  markdown.appendCodeblock(dataLines.join("\n"));
-  return markdown;
+  return undefined;
 }
 
 async function toggleBar() {
