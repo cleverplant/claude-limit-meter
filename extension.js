@@ -277,6 +277,21 @@ function fmtResetTime(isoStr) {
   } catch { return "—"; }
 }
 
+function fmtRemaining(isoStr) {
+  if (!isoStr) return "—";
+  const ms = new Date(isoStr) - Date.now();
+  if (ms <= 0) return "сброс";
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const hh = h % 24;
+    return hh > 0 ? `${d} дн ${hh} ч` : `${d} дн`;
+  }
+  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+}
+
 function barHtml(pct, height = 14) {
   const color = pct >= 90 ? "#e05252" : pct >= 65 ? "#e0a030" : "#4caf82";
   return `<div style="background:#2a2a2a;border-radius:4px;height:${height}px;width:100%;margin:4px 0 8px">
@@ -291,6 +306,8 @@ function buildFullHtml({ quotaData, planName, workspaceFolders, defaultCwd, cont
   const sdPct = Math.round(sd.utilization ?? 0);
   const fhReset = fmtResetTime(fh.resets_at);
   const sdReset = fmtResetTime(sd.resets_at);
+  const fhRemaining = fmtRemaining(fh.resets_at);
+  const sdRemaining = fmtRemaining(sd.resets_at);
   const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const planBadge = planName ? `<span style="font-weight:400;font-size:12px;opacity:.75;margin-left:8px">${planName}</span>` : "";
 
@@ -331,10 +348,10 @@ function buildFullHtml({ quotaData, planName, workspaceFolders, defaultCwd, cont
   return `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);font-size:13px;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);padding:16px;margin:0;min-width:300px">
 
 <div style="font-weight:600;font-size:14px;margin-bottom:14px">Квота Anthropic${planBadge}</div>
-<div style="opacity:.7;font-size:11px;margin-bottom:2px">5 часов &nbsp;·&nbsp; сброс в ${fhReset}</div>
+<div style="opacity:.7;font-size:11px;margin-bottom:2px">через ${fhRemaining} &nbsp;·&nbsp; сброс в ${fhReset}</div>
 ${barHtml(fhPct)}
 <div style="font-weight:700;font-size:24px;margin-bottom:14px">${fhPct}%</div>
-<div style="opacity:.7;font-size:11px;margin-bottom:2px">7 дней &nbsp;·&nbsp; сброс ${sdReset}</div>
+<div style="opacity:.7;font-size:11px;margin-bottom:2px">через ${sdRemaining} &nbsp;·&nbsp; сброс ${sdReset}</div>
 ${barHtml(sdPct)}
 <div style="font-weight:700;font-size:24px;margin-bottom:12px">${sdPct}%</div>
 <button id="btn-quota" onclick="refreshQuota()" style="background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:none;border-radius:3px;padding:5px 14px;font-size:12px;cursor:pointer">↺ Обновить</button>
