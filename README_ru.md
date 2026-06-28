@@ -2,9 +2,9 @@
 
 [Скачать VSIX v0.4.1](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.4.1/claude-limit-meter-0.4.1.vsix) · [Описание релиза](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.4.1) · [English version](README.md)
 
-![Панель Claude Quota](claude-limit-web.png)
+![Панель Claude Quota](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/claude-limit-web.png)
 
-![Статус-бар](status-bar.png)
+![Статус-бар](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/status-bar.png)
 
 > **Важно про источник данных.** Расширение читает всё из **CLI-версии
 > Claude Code** (терминальной) — из её лога сессий в

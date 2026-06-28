@@ -2,9 +2,9 @@
 
 [Download VSIX v0.4.1](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.4.1/claude-limit-meter-0.4.1.vsix) · [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.4.1) · [Русская версия](README_ru.md)
 
-![Claude Quota panel](claude-limit-web.png)
+![Claude Quota panel](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/claude-limit-web.png)
 
-![Status bar items](status-bar.png)
+![Status bar items](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/status-bar.png)
 
 > **Heads-up about data source.** This extension reads everything from the
 > **CLI (terminal) Claude Code** — its session logs in `~/.claude/projects/`
