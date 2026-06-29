@@ -52,7 +52,7 @@ The user is approaching the context limit (typically the 91% auto-compact warnin
 
        Current git state: branch <branch>, <clean|dirty>, last commit <hash> <subject>.
 
-6. After the code block, report ONE short line: what was added to `plan.md` (if anything) and "Откройте новый чат и вставьте промпт выше." (or the English equivalent).
+6. After the code block, report ONE short line: what was added to `plan.md` (if anything) and "Open a new chat and paste the prompt above."
 
 ## Post-compact summary extraction
 
@@ -96,8 +96,8 @@ How to extract — pick the JSONL of the CURRENT session only. Heuristic: the ac
 Interpretation:
 
 - `NO_JSONL` — no session files at all in this project's directory. Skip the summary block entirely.
-- `NO_SUMMARY` — current session's JSONL has no `isCompactSummary` entry. Tell the user: "Post-compact summary в текущей сессии не найден. Для глубокого контекста: сначала `/compact`, потом `/kick`."
-- Output starts with `AGE_MIN=<N>` then `---SUMMARY---` then summary text — extract the summary text (everything after `---SUMMARY---`) and embed it AS-IS in a second fenced code block after the handoff message. Heading must include the age, e.g.: `Полный контекст (post-compact summary, возраст: 14 мин — решайте сами, актуален ли):`. If `AGE_MIN=unknown`, omit the age but still embed.
-- `WARN: multiple active JSONLs` on stderr — surface to the user: "Внимание: в этом проекте открыто >1 окна Claude Code. Я взял самое свежее, но убедитесь, что это нужная сессия."
+- `NO_SUMMARY` — current session's JSONL has no `isCompactSummary` entry. Tell the user: "No post-compact summary found in the current session. For deeper context: run `/compact` first, then `/kick`."
+- Output starts with `AGE_MIN=<N>` then `---SUMMARY---` then summary text — extract the summary text (everything after `---SUMMARY---`) and embed it AS-IS in a second fenced code block after the handoff message. Heading must include the age, e.g.: `Full context (post-compact summary, age: 14 min — decide for yourself whether it is still current):`. If `AGE_MIN=unknown`, omit the age but still embed.
+- `WARN: multiple active JSONLs` on stderr — surface to the user: "Warning: more than one Claude Code window is open in this project. I picked the most recent JSONL, but make sure it is the session you want."
 
 Do not edit the summary. Do not paraphrase. Do not truncate unless it exceeds ~30K characters; in that case, keep the first and last halves and put `[...truncated...]` in the middle.

@@ -1,21 +1,64 @@
 # Claude Limit Meter
 
-[Download VSIX v0.4.1](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.4.1/claude-limit-meter-0.4.1.vsix) · [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.4.1) · [Русская версия](README_ru.md)
+[Download VSIX v0.5.0](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.5.0/claude-limit-meter-0.5.0.vsix) · [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.5.0) · [Русская версия](README_ru.md)
 
 ![Claude Quota panel](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/claude-limit-web.png)
 
-![Status bar items](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/status-bar.png)
-
 > **Heads-up about data source.** This extension reads everything from the
-> **CLI (terminal) Claude Code** — its session logs in `~/.claude/projects/`
-> and its OAuth credentials in `~/.claude/.credentials.json`. It does **not**
+> **CLI (terminal) Claude Code** — its OAuth credentials in
+> `~/.claude/.credentials.json` and, for the `/context` block, a fresh
+> CLI sub-session spawned in the chosen workspace folder. It does **not**
 > talk to the graphical "Claude Code for VS Code" panel and has no access
-> to its in-memory state. As a result, the `/context` block inside the Quota
-> web-panel can show a different model or token breakdown than the GUI
-> Claude Code panel for the same project — the CLI spawns a fresh session
-> to evaluate `/context`, while the GUI shows the live session it has open.
-> The 5h / 7-day quota numbers, on the other hand, come from the Anthropic
-> account and always match across CLI and GUI.
+> to its in-memory state. As a result, the `/context` block inside the
+> Quota web-panel can show a different model or token breakdown than the
+> GUI Claude Code panel for the same project — the CLI spawns a fresh
+> session to evaluate `/context`, while the GUI shows the live session it
+> has open. The 5h / 7-day quota numbers, on the other hand, come from the
+> Anthropic account and always match across CLI and GUI.
+
+---
+
+## What's new in 0.5.0
+
+This is a breaking-change release. The extension surface has been cut
+down to the one piece that worked reliably across every Claude Code
+environment tested. Specifically:
+
+- The `cc-ctx` status bar item (the percent + colored bar) is **gone**.
+  Claude Code already shows the same number in its own footer; the
+  duplicate added noise and a maintenance burden every time Anthropic
+  changed the formula.
+- The PostCompact auto-handoff hook is **gone**. The hook's
+  `systemMessage` output channel is silently dropped by the VS Code
+  Claude Code extension (upstream issue), so the hook fired but its
+  output never reached the chat. Keeping it on disk amounted to
+  promising a feature that did not work for VS Code users.
+- The `🟢 / ⚪` kick-status dot is **gone** along with the hook it
+  toggled.
+- The slash commands `/kick-on` and `/kick-off` are **gone**. With no
+  hook, there is nothing to toggle.
+- All settings under `claudeLimitMeter.*` that controlled the above are
+  removed: `updateIntervalSeconds`, `barLength`, `showBar`,
+  `warnPercent`, `highPercent`, `criticalPercent`,
+  `contextWindowOverride`, `show5hUsage`, `showWeeklyUsage`,
+  `scanWindowHours`, `showKickStatus`.
+
+What is **kept** and what is **new** for existing users:
+
+- The `limit` status bar item and its Claude Quota web panel are kept
+  unchanged.
+- The `/kick` slash command is kept. Unlike the PostCompact hook, the
+  slash-command path goes through the regular assistant message
+  pipeline, so the handoff block always renders in chat with a Copy
+  button. The skill body is now in English.
+- On first activate, the extension auto-installs `~/.claude/commands/kick.md`
+  so `/kick` is immediately available in any Claude Code chat.
+- On every activate, the extension cleans up the v0.4.x leftovers in
+  `~/.claude/`: `scripts/kick-hook.js`, `commands/kick-on.md`,
+  `commands/kick-off.md`, `.kick-installed-version`, `.kick-disabled`,
+  `.kick-log`, and any `hooks.PostCompact` entry whose `command`
+  contains `kick-hook.js`. Other keys in `settings.json` are left
+  untouched.
 
 ---
 
@@ -23,92 +66,61 @@
 
 What this extension adds to VS Code and how to use it day-to-day.
 
-### Three status bar items
+### One status bar item: `limit`
 
-From left to right at the bottom-right of VS Code:
+At the bottom right of VS Code a single new item appears:
 
-1. **`cc-ctx ▓▓▓▓▓░░░ 13%`** — the context-fill meter for your most recent
-   Claude Code chat. The percent matches what Claude Code itself shows
-   inside its own `/context` dialog. The bar colour changes as pressure
-   grows:
+```
+$(pulse) limit
+```
 
-   ```
-   🟢 green   0–64%    OK
-   🟡 yellow  65–79%   warm
-   🟠 orange  80–89%   high
-   🔴 red     90%+     critical, auto-compact imminent
-   ```
-
-2. **`🟢` / `⚪` dot** (kick hook indicator) — green when the `/kick auto`
-   PostCompact hook is enabled, white when disabled. Click to toggle.
-
-3. **`limit`** — opens the **Claude Quota** web panel (see below). Shows
-   your real 5-hour and 7-day usage against your Anthropic plan.
+Click it to open the Claude Quota web panel.
 
 ### The Quota panel (click `limit`)
 
-A panel that opens in the editor area with three blocks:
+A panel that opens in the editor area with two blocks:
 
 - **Anthropic quota** — your 5-hour rolling block and 7-day usage as
   percentages, with the time remaining until each window resets and a
   plan badge (`Pro` / `Max` / `Free`). The numbers come from Anthropic
   servers via the same endpoint the official Claude Code app uses. They
   are cached locally for 5 minutes — clicking `limit` again returns the
-  cached numbers; the `↺ Обновить / Refresh` button forces a fresh fetch.
+  cached numbers; the `↺ Refresh` button forces a fresh fetch.
 - **Project context (`/context`)** — pick a workspace folder from the
   dropdown and click `/context`. The extension spawns the Claude Code
   CLI in that directory and shows the parsed model name, total context
   used, and a breakdown by category (System prompt, Memory files, Skills,
   Messages, etc.).
-- **Help link** explaining the 5-minute cache.
 
 > ⚠️ The `/context` block runs a CLI sub-session, not your live VS Code
 > Claude Code session. The model and percentages can differ from the
 > GUI panel — see the heads-up at the top.
 
-### `/kick` PostCompact handoff hook
+### The `/kick` slash command
 
-The extension auto-installs a small hook into Claude Code that helps you
-survive auto-compact without losing your bearings.
+`/kick` is a slash command that generates a copy-ready handoff message
+for moving from a near-full chat into a fresh one without losing
+orientation.
 
-**The problem it solves.** When a Claude Code chat hits ~91% context, it
-auto-compacts: the visible history collapses into a summary, and the real
-exchange you were working with is no longer easy to navigate. You can't
-just `Ctrl+F` for the message you remember — it isn't on screen any more.
+**What it does.** When you type `/kick` in any Claude Code chat, the
+skill collects the project's git state, reads `plans/plan.md` if your
+project has one, summarizes what happened in the current session, and
+prints a fenced markdown block that you can copy with one click. If you
+ran `/compact` first, `/kick` also extracts the post-compact summary
+from the session JSONL and embeds it as-is in a second fenced block.
 
-**What the hook does.** Right after every auto-compact (and on demand
-via `/kick`), it drops a **ready-to-paste handoff block** into your chat
-as a system message. The block includes:
+**Why it survives where the auto-hook failed.** `/kick` is a regular
+slash command. Its output goes through the same chat-message pipeline
+as any other assistant reply, so it renders the same way in every
+Claude Code surface (CLI, VS Code extension, JetBrains plugin). The
+v0.4.x PostCompact auto-hook tried to do the same thing automatically
+after compaction, but its `systemMessage` output channel is silently
+dropped by the VS Code Claude Code extension. v0.5.0 removes the
+auto-hook entirely and ships only the manual command, which works.
 
-- the current git branch, last commit, working-tree state;
-- the active stage from `plans/plan.md` (if the project has one) and the
-  next concrete `[ ]` step;
-- if Claude Code wrote a structured summary during compaction, that
-  summary embedded as-is.
-
-You copy that block, open a new chat, paste, and you're oriented in one
-move. The hook output goes through the `systemMessage` channel — **no
-model tokens are spent on it.**
-
-**Slash commands available in any Claude Code chat:**
-
-- `/kick` — manual handoff right now (use it before the 91% threshold
-  to migrate to a new chat early).
-- `/kick-on` — enable PostCompact auto-handoff.
-- `/kick-off` — disable PostCompact auto-handoff (the hook stays
-  installed but exits silently when it fires).
-
-**Three ways to verify the hook is alive:**
-
-1. **Status bar dot** — green = on, white = off.
-2. **After `/compact`** — a system message appears starting with
-   `🔄 /kick auto (PostCompact) — handoff готов:`.
-3. **The fire log** — open `~/.claude/.kick-log`; every successful fire
-   appends one line. Auto-trimmed to the last 50 entries.
-
-A practical recipe when context is high: run `/compact` **first**, then
-`/kick`. Compaction writes a structured summary that `/kick` then embeds
-into the handoff block.
+**Recommended flow when context is high:** run `/compact` first, then
+`/kick`. Compaction writes a structured summary that `/kick` will
+embed in its output.
 
 ### Install
 
@@ -118,35 +130,26 @@ From the project folder in PowerShell:
 ./install.ps1
 ```
 
-Then **`Developer: Reload Window`** in VS Code. The kick hook installs
-itself on first activate.
+Then **`Developer: Reload Window`** in VS Code. On first activate, the
+`/kick` skill is auto-installed into `~/.claude/commands/kick.md`, and
+any leftover v0.4.x kick-hook artifacts are removed.
 
-### Uninstall (two valid modes)
+### Uninstall
 
-Removing the `.vsix` does **not** remove the `/kick` hook — VS Code
-doesn't call `deactivate()` on uninstall, so files written into
-`~/.claude/` stay on disk until you remove them explicitly. Pick a mode:
+Removing the `.vsix` does **not** automatically remove
+`~/.claude/commands/kick.md` — VS Code doesn't call `deactivate()` on
+uninstall, so the slash command stays available. If that's what you
+want (a leaner extension list, `/kick` still works), you can stop here.
 
-**Option A — keep the hook, drop the status bar indicators.**
+For full clean removal:
+
 1. `Extensions → Claude Limit Meter → Uninstall`.
-2. `Developer: Reload Window`.
-
-You lose the three status bar items. You keep: `/kick`, `/kick-on`,
-`/kick-off` slash commands, the PostCompact auto-handoff, the fire log.
-
-**Option B — full clean removal.**
-1. Command Palette → `Claude Limit Meter: Uninstall Kick Hook`.
-2. `Extensions → Claude Limit Meter → Uninstall`.
+2. Delete `~/.claude/commands/kick.md` (optional — the slash command
+   stops working).
 3. `Developer: Reload Window`.
 
-Order matters. If you uninstall the `.vsix` first, the command in step 1
-disappears from the palette — see "Manual cleanup" in the technical
-section below.
-
-**Agent-driven uninstall.** Copy-ready prompts for Codex / Claude Code
-are shipped for both modes — see
-[prompts/uninstall-full.md](prompts/uninstall-full.md) and
-[prompts/uninstall-vsix-only.md](prompts/uninstall-vsix-only.md).
+**Agent-driven uninstall.** A copy-ready prompt for Codex / Claude Code
+is shipped at [prompts/uninstall-full.md](prompts/uninstall-full.md).
 
 ---
 
@@ -160,8 +163,7 @@ Three independent inputs:
 
 | Block | Source | API call? |
 |---|---|---|
-| `cc-ctx %` and hover tooltip | Local JSONL: `~/.claude/projects/<encoded-cwd>/*.jsonl` | No |
-| 5h / 7d quota in Quota panel | `GET https://api.anthropic.com/api/oauth/usage` using the OAuth access token from `~/.claude/.credentials.json` | Yes (Anthropic) |
+| 5h / 7d quota | `GET https://api.anthropic.com/api/oauth/usage` using the OAuth access token from `~/.claude/.credentials.json` | Yes (Anthropic) |
 | Plan badge (`Pro` / `Max`) | `GET https://api.anthropic.com/api/oauth/profile` (same token) | Yes (Anthropic) |
 | `/context` block | Spawns `C:\Tools\claude-wrap.exe` in the picked workspace folder, pipes `/context` to stdin, parses the markdown reply | Indirectly — through the CLI |
 
@@ -169,112 +171,35 @@ The extension never sends chat content anywhere, never reads message
 bodies, and never requires you to paste an API key. The OAuth token is
 the same token the CLI itself already uses.
 
-### Context percent formula
-
-For each assistant message in the JSONL:
-
-```text
-context_tokens = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
-effective_window = model_window − max_output_tokens − 13 000   # auto-compact safety margin
-percent = context_tokens / effective_window × 100
-```
-
-This matches what Claude Code shows inside its own `/context` dialog
-(verified against `vXe()` in the Claude Code 2.1.187 webview bundle).
-`max_output_tokens` per model: 64K for `claude-opus-4-7`,
-`claude-opus-4-6`, `claude-sonnet-4-x`, `claude-haiku-4-5`;
-8K for `claude-opus-4-0`, `claude-opus-4-1`, `claude-3-*`.
-
-### Context window detection
-
-Priority order:
-
-1. `claudeLimitMeter.contextWindowOverride` setting (manual override).
-2. Model name in the JSONL contains `[1m]` (rare — the CLI strips it).
-3. `<chatCwd>/.claude/settings.json#model` contains `[1m]`
-   (project-level 1M-beta opt-in).
-4. `~/.claude/settings.json#model` contains `[1m]` (global 1M-beta
-   opt-in).
-5. Fallback: **200 000 tokens** for any `claude-*` family.
-
 ### All settings keys
 
 ```text
-claudeLimitMeter.updateIntervalSeconds      # how often to re-scan the JSONL
-claudeLimitMeter.barLength                  # characters in the cc-ctx bar
-claudeLimitMeter.showBar                    # show the colored bar
-claudeLimitMeter.textColor                  # status bar text color
-claudeLimitMeter.warnPercent                # yellow threshold (default 65)
-claudeLimitMeter.highPercent                # orange threshold (default 80)
-claudeLimitMeter.criticalPercent            # red threshold (default 90)
-claudeLimitMeter.contextWindowOverride      # force a specific window size
-claudeLimitMeter.show5hUsage                # 5h block in tooltip
-claudeLimitMeter.showWeeklyUsage            # weekly block in tooltip
-claudeLimitMeter.scanWindowHours            # how far back to scan
-claudeLimitMeter.statusBarPriority          # position of cc-ctx
-claudeLimitMeter.usagePageUrl               # URL opened on cc-ctx click
-claudeLimitMeter.showKickStatus             # show the kick dot
-```
-
-### Status bar position
-
-`statusBarPriority` (default `999`) is the cc-ctx priority in the right
-cluster. Higher = further LEFT. The kick dot sits at `priority − 1`
-and the limit button at `priority − 2`, so the visual order is always
-`cc-ctx | kick | limit`.
-
-### Kick hook — files deployed
-
-On first activate the extension writes (idempotent, tracked via
-`~/.claude/.kick-installed-version`):
-
-```text
-~/.claude/scripts/kick-hook.js          — hook body (systemMessage only, no model tokens)
-~/.claude/commands/kick.md              — slash command: manual handoff
-~/.claude/commands/kick-on.md           — slash command: enable auto
-~/.claude/commands/kick-off.md          — slash command: disable auto
-~/.claude/settings.json                 — hooks.PostCompact entry merged in
-```
-
-Runtime state files:
-
-```text
-~/.claude/.kick-installed-version       — version of currently-deployed hook
-~/.claude/.kick-disabled                — toggle marker: present = OFF, absent = ON
-~/.claude/.kick-log                     — last 50 fires, auto-rotated
+claudeLimitMeter.usagePageUrl       # URL opened by the Open Usage Page command
+claudeLimitMeter.statusBarPriority  # position of the limit item (higher = further left)
+claudeLimitMeter.textColor          # status bar text color
 ```
 
 ### Command Palette commands
 
 ```text
-Claude Limit Meter: Refresh
-Claude Limit Meter: Toggle Bar View
 Claude Limit Meter: Open Usage Page (claude.ai)
 Claude Limit Meter: Show Quota Limits
-Claude Limit Meter: Toggle Kick Auto-Handoff Hook
-Claude Limit Meter: Reinstall Kick Hook (force overwrite)
-Claude Limit Meter: Uninstall Kick Hook
 ```
 
-### Manual cleanup (if `.vsix` was already removed)
+### Files written into `~/.claude/`
 
-Delete these files:
+On every activate (idempotent):
 
 ```text
-~/.claude/scripts/kick-hook.js
-~/.claude/commands/kick.md
-~/.claude/commands/kick-on.md
-~/.claude/commands/kick-off.md
-~/.claude/.kick-installed-version
-~/.claude/.kick-disabled                (only if present)
-~/.claude/.kick-log                     (only if present)
+~/.claude/commands/kick.md          — the /kick slash command body
 ```
 
-Then open `~/.claude/settings.json` and remove the entry inside
-`hooks.PostCompact` whose `command` contains `kick-hook.js`. If the
-`PostCompact` array becomes empty, delete the `PostCompact` key. If
-`hooks` becomes empty, delete the `hooks` key. All other keys
-(`permissions`, `model`, `env`, `mcpServers`, …) must be left alone.
+Nothing else is written. The previous v0.4.x footprint
+(`scripts/kick-hook.js`, `commands/kick-on.md`, `commands/kick-off.md`,
+`.kick-installed-version`, `.kick-disabled`, `.kick-log`, and the
+`hooks.PostCompact` entry inside `settings.json`) is removed
+automatically the first time v0.5.0 activates on a machine that had
+v0.4.x installed before.
 
 ### Why limits are raw quota, not raw token counts
 

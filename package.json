@@ -1,8 +1,8 @@
 {
   "name": "claude-limit-meter",
   "displayName": "Claude Limit Meter",
-  "description": "Shows current Claude Code context pressure and 5h/weekly token usage in the VS Code status bar.",
-  "version": "0.4.2",
+  "description": "Status bar button that opens an Anthropic quota panel (5h / 7d) and installs the /kick slash command for chat handoff.",
+  "version": "0.5.0",
   "publisher": "local",
   "repository": {
     "type": "git",
@@ -27,28 +27,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "claudeLimitMeter.refresh",
-        "title": "Claude Limit Meter: Refresh"
-      },
-      {
-        "command": "claudeLimitMeter.toggleBar",
-        "title": "Claude Limit Meter: Toggle Bar View"
-      },
-      {
         "command": "claudeLimitMeter.openUsagePage",
         "title": "Claude Limit Meter: Open Usage Page (claude.ai)"
-      },
-      {
-        "command": "claudeLimitMeter.toggleKickHook",
-        "title": "Claude Limit Meter: Toggle Kick Auto-Handoff Hook"
-      },
-      {
-        "command": "claudeLimitMeter.reinstallKickHook",
-        "title": "Claude Limit Meter: Reinstall Kick Hook (force overwrite)"
-      },
-      {
-        "command": "claudeLimitMeter.uninstallKickHook",
-        "title": "Claude Limit Meter: Uninstall Kick Hook"
       },
       {
         "command": "claudeLimitMeter.showLimit",
@@ -58,87 +38,20 @@
     "configuration": {
       "title": "Claude Limit Meter",
       "properties": {
-        "claudeLimitMeter.updateIntervalSeconds": {
-          "type": "number",
-          "default": 10,
-          "minimum": 2,
-          "description": "How often to scan Claude Code session logs."
+        "claudeLimitMeter.usagePageUrl": {
+          "type": "string",
+          "default": "https://claude.ai/settings/usage",
+          "description": "URL opened by the Open Usage Page command."
         },
-        "claudeLimitMeter.barLength": {
+        "claudeLimitMeter.statusBarPriority": {
           "type": "number",
-          "default": 8,
-          "minimum": 4,
-          "maximum": 14,
-          "description": "Number of characters in the status bar meter."
-        },
-        "claudeLimitMeter.showBar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the compact colored bar in the status bar."
+          "default": 999,
+          "description": "Status bar item priority. Higher value places the item further to the left in the right-aligned status bar cluster."
         },
         "claudeLimitMeter.textColor": {
           "type": "string",
           "default": "#1b003f",
           "description": "Status bar text color. Use a dark high-contrast color for bright status bars."
-        },
-        "claudeLimitMeter.warnPercent": {
-          "type": "number",
-          "default": 65,
-          "minimum": 1,
-          "maximum": 99,
-          "description": "Context percentage where the meter switches to yellow."
-        },
-        "claudeLimitMeter.highPercent": {
-          "type": "number",
-          "default": 80,
-          "minimum": 1,
-          "maximum": 99,
-          "description": "Context percentage where the meter switches to orange."
-        },
-        "claudeLimitMeter.criticalPercent": {
-          "type": "number",
-          "default": 90,
-          "minimum": 1,
-          "maximum": 100,
-          "description": "Context percentage where the meter switches to red."
-        },
-        "claudeLimitMeter.contextWindowOverride": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "Override model context window size in tokens. 0 = auto-detect from model name."
-        },
-        "claudeLimitMeter.show5hUsage": {
-          "type": "boolean",
-          "default": true,
-          "description": "Aggregate and show 5-hour rolling token usage block in tooltip."
-        },
-        "claudeLimitMeter.showWeeklyUsage": {
-          "type": "boolean",
-          "default": true,
-          "description": "Aggregate and show weekly token usage in tooltip."
-        },
-        "claudeLimitMeter.scanWindowHours": {
-          "type": "number",
-          "default": 192,
-          "minimum": 24,
-          "maximum": 720,
-          "description": "How many hours of session history to scan for usage aggregation (default: 8 days)."
-        },
-        "claudeLimitMeter.statusBarPriority": {
-          "type": "number",
-          "default": 999,
-          "description": "Status bar item priority for cc-ctx. Higher value places the item further to the left in the right-aligned status bar cluster."
-        },
-        "claudeLimitMeter.usagePageUrl": {
-          "type": "string",
-          "default": "https://claude.ai/settings/usage",
-          "description": "URL opened on click of the status bar item."
-        },
-        "claudeLimitMeter.showKickStatus": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show separate status bar item for the /kick auto PostCompact hook (right of cc-ctx)."
         }
       }
     }

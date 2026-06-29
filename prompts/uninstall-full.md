@@ -1,97 +1,90 @@
-# Uninstall prompt — full removal (Option B)
+# Uninstall prompt — full removal
 
-Copy-ready prompt for **Codex** or **Claude Code** that fully removes the
-Claude Limit Meter VS Code extension **and** every artifact it deployed
-into `~/.claude/` (the `/kick auto` PostCompact hook, slash commands,
-markers, log, and the `hooks.PostCompact` entry inside
-`~/.claude/settings.json`).
+Copy-ready prompt for **Codex** or **Claude Code** that fully removes
+the Claude Limit Meter VS Code extension and the single artifact it
+deploys into `~/.claude/` (`~/.claude/commands/kick.md`).
 
 Equivalent to running, in order:
 
-1. Command Palette → `Claude Limit Meter: Uninstall Kick Hook`
-2. `Extensions → Claude Limit Meter → Uninstall`
+1. `Extensions → Claude Limit Meter → Uninstall`
+2. Delete `~/.claude/commands/kick.md`
 3. `Developer: Reload Window`
 
 The agent **cannot trigger step 3** from outside VS Code — you press
-the keys yourself after the agent finishes. The agent also cannot call
-Command Palette commands from outside the VS Code process; it
-replicates the effect of `Claude Limit Meter: Uninstall Kick Hook` via
-direct `fs` + JSON operations instead.
+the keys yourself after the agent finishes.
 
-Paste the block below into a Codex or Claude Code session. The prompt
-is written in Russian — the agent's action plan is language-agnostic.
+Paste the block below into a Codex or Claude Code session.
 
 ---
 
 ```
-Задача: полностью удалить расширение Claude Limit Meter
-(`local.claude-limit-meter`) и все следы PostCompact-хука `/kick auto`,
-который оно развернуло в `~/.claude/`.
+Task: fully remove the Claude Limit Meter VS Code extension
+(`local.claude-limit-meter`) and the `/kick` slash command file that it
+deployed to `~/.claude/commands/kick.md`.
 
-Хост: Windows. Все пути — от `$env:USERPROFILE`.
+Host: Windows. All paths are rooted at `$env:USERPROFILE`.
 
-Чего ты сделать НЕ можешь (отдашь пользователю в финале):
-- вызвать `Developer: Reload Window` в VS Code (нет внешнего API);
-- вызвать команду `Claude Limit Meter: Uninstall Kick Hook` через
-  Command Palette (привязана к процессу VS Code). Поэтому
-  воспроизводишь её эффект напрямую через fs.
+What you CANNOT do (you will hand these to the user at the end):
+- trigger `Developer: Reload Window` in VS Code (no external API).
 
-Шаги (строго по порядку, не пропускать verification):
+Steps (in order, do not skip verification):
 
-1. Pre-flight. Если ни одного из путей нет — расширение уже не
-   установлено, прервись и сообщи:
+1. Pre-flight. If none of these paths exist, the extension is already
+   gone — stop and tell the user:
    - `$env:USERPROFILE\.vscode\extensions\local.claude-limit-meter-*`
+   - `$env:USERPROFILE\.claude\commands\kick.md`
+
+2. Delete the slash command file (optional, but the user asked for a
+   full removal so do delete it):
+   - `$env:USERPROFILE\.claude\commands\kick.md`
+   The `commands/` folder itself MUST stay — it can hold other slash
+   commands from Claude Code or from other extensions.
+
+3. Belt-and-braces. v0.5.0 already cleans these up on activate, but in
+   case the user never installed v0.5.0 and is jumping straight from
+   v0.4.x to fully gone, also remove (if present):
    - `$env:USERPROFILE\.claude\scripts\kick-hook.js`
+   - `$env:USERPROFILE\.claude\commands\kick-on.md`
+   - `$env:USERPROFILE\.claude\commands\kick-off.md`
    - `$env:USERPROFILE\.claude\.kick-installed-version`
+   - `$env:USERPROFILE\.claude\.kick-disabled`
+   - `$env:USERPROFILE\.claude\.kick-log`
+   And patch `$env:USERPROFILE\.claude\settings.json`:
+   - read the JSON;
+   - in `hooks.PostCompact` remove every entry whose inner `hooks` has
+     a `command` containing the substring `kick-hook.js`;
+   - if `PostCompact` becomes empty, delete the `PostCompact` key;
+   - if `hooks` becomes empty, delete the `hooks` key;
+   - all other keys (`permissions`, `model`, `env`, `mcpServers`,
+     `apiKeyHelper`, any custom) MUST be left untouched;
+   - write atomically (temp file + rename).
 
-2. Снять hook-запись из `~/.claude/settings.json` (САМОЕ ОПАСНОЕ место):
-   - прочитай JSON;
-   - в `hooks.PostCompact` найди и удали ВСЕ элементы, у которых хотя бы
-     один внутренний hook имеет `command`, содержащий подстроку
-     `kick-hook.js`;
-   - если массив `PostCompact` стал пустым — удали ключ `PostCompact`;
-   - если объект `hooks` стал пустым — удали ключ `hooks`;
-   - ВСЕ остальные ключи (`permissions`, `model`, `env`, `mcpServers`,
-     `apiKeyHelper`, любые кастомные) — НЕ ТРОГАТЬ;
-   - сохрани атомарно (через временный файл + rename).
-
-3. Удалить файлы хука:
-   - `~/.claude/scripts/kick-hook.js`
-   - `~/.claude/commands/kick.md`
-   - `~/.claude/commands/kick-on.md`
-   - `~/.claude/commands/kick-off.md`
-   - `~/.claude/.kick-installed-version`
-   - `~/.claude/.kick-disabled` (если есть)
-   - `~/.claude/.kick-log` (если есть)
-   Папки `scripts/` и `commands/` НЕ удалять — там могут лежать чужие
-   скрипты и слэш-команды Claude Code.
-
-4. Удалить установленные папки расширения целиком:
-   - все `$env:USERPROFILE\.vscode\extensions\local.claude-limit-meter-*`
+4. Delete every installed extension folder:
+   - all `$env:USERPROFILE\.vscode\extensions\local.claude-limit-meter-*`
      → `Remove-Item -Recurse -Force`.
 
-5. Поправить `$env:USERPROFILE\.vscode\extensions\extensions.json`
-   (если файл есть):
-   - прочитай JSON-массив;
-   - удали ВСЕ элементы с `identifier.id == "local.claude-limit-meter"`
-     или с `relativeLocation`, начинающимся на `local.claude-limit-meter-`;
-   - запиши обратно атомарно.
+5. Patch `$env:USERPROFILE\.vscode\extensions\extensions.json` (if the
+   file exists):
+   - read the JSON array;
+   - remove every entry with `identifier.id == "local.claude-limit-meter"`
+     or with `relativeLocation` starting with `local.claude-limit-meter-`;
+   - write atomically.
 
 6. Verification:
-   - `Test-Path` для всех путей из шагов 3 и 4 → `False`;
-   - `~/.claude/settings.json` парсится как валидный JSON и не содержит
-     подстроку `kick-hook.js`;
-   - `extensions.json` не содержит `local.claude-limit-meter`.
-   Если что-то из этого упало — откатывайся НЕ через сохранённый
-   backup `settings.json`, а сообщи пользователю что сломалось.
+   - `Test-Path` on every path from steps 2, 3, and 4 returns `False`;
+   - `~/.claude/settings.json` parses as valid JSON and contains no
+     substring `kick-hook.js`;
+   - `extensions.json` contains no string `local.claude-limit-meter`.
+   If any of these fail, do NOT try to recover by restoring a backup
+   of `settings.json` — tell the user exactly what failed.
 
-7. Финальный отчёт:
-   - короткий список того, что удалено;
-   - явная строка: «Чтобы VS Code забыл расширение окончательно —
-     Ctrl+Shift+P → Developer: Reload Window. Это ты делаешь сам.»
+7. Final report:
+   - short list of what was deleted;
+   - explicit line: "For VS Code to forget the extension completely —
+     Ctrl+Shift+P → Developer: Reload Window. You do this yourself."
 
-Запрещено:
-- удалять `~/.claude/` или `~/.vscode/extensions/` целиком;
-- редактировать `settings.json` без атомарной записи;
-- пропускать verification.
+Forbidden:
+- deleting `~/.claude/` or `~/.vscode/extensions/` wholesale;
+- editing `settings.json` without an atomic write;
+- skipping verification.
 ```

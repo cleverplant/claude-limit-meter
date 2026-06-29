@@ -10,14 +10,13 @@ User-level rules in `~/.claude/CLAUDE.md` still apply (secrets discipline, git s
 
 ## 1. What this project is
 
-`Claude Limit Meter` — a local-only VS Code extension that shows current Claude Code context pressure and 5-hour / weekly token usage in the VS Code status bar. It also bundles a PostCompact auto-handoff hook for Claude Code (`/kick auto`).
+`Claude Limit Meter` — a small local-only VS Code extension that adds one status bar button (`limit`) which opens a Claude Quota web panel (Anthropic 5h / 7d quota and the project's `/context` block). On first activate it also installs one Claude Code slash command (`~/.claude/commands/kick.md`).
 
-The extension reads only local Claude Code session logs from `%USERPROFILE%\.claude\projects`. It does not call any Anthropic API, does not require an API key, and does not transmit user data anywhere.
+The extension talks to Anthropic only to fetch the OAuth-protected `/api/oauth/usage` and `/api/oauth/profile` endpoints — the same the CLI uses. It does not require a separate API key. It does not transmit chat content anywhere.
 
-Primary surfaces:
-- `cc-ctx` — status bar item with percent + colored bar
-- kick indicator — separate status bar item showing PostCompact hook ON/OFF
-- Hover tooltip — model, context tokens, 5h block, weekly block
+Primary surface:
+- `limit` status bar item — click to open the Claude Quota web panel.
+- `/kick` slash command — manual chat handoff, copied from `resources/kick.md` to `~/.claude/commands/kick.md` on activate.
 
 ---
 
@@ -28,14 +27,15 @@ extension.js                       — all runtime logic (single file, no bundle
 package.json                       — manifest, commands, settings schema, version
 install.ps1                        — local install to ~/.vscode/extensions + registry sync
 resources/
-  kick-hook.js                     — PostCompact hook body deployed to ~/.claude/scripts/
-  kick.md                          — manual handoff slash command
-  kick-on.md                       — enable PostCompact auto-handoff
-  kick-off.md                      — disable PostCompact auto-handoff
-README.md                          — English user-facing docs (also primary npm/marketplace text)
+  kick.md                          — /kick slash command body (deployed to ~/.claude/commands/)
+prompts/
+  uninstall-full.md                — copy-ready agent prompt for full uninstall
+plans/
+  plan.md                          — the v0.5.0 refactor ExecPlan (contributor doc)
+README.md                          — English user-facing docs (primary marketplace text)
 README_ru.md                       — Russian user-facing docs
+PLANS.md                           — ExecPlan template (root-level contributor doc)
 claude-limit-web.png               — quota panel screenshot used in both READMEs
-status-bar.png                     — status bar items screenshot used in both READMEs
 LICENSE                            — MIT
 .vscodeignore                      — controls what ships inside the .vsix
 .gitignore                         — controls what reaches the public repo
@@ -63,10 +63,10 @@ After install, run `Developer: Reload Window` in VS Code. This is mandatory — 
 Package a `.vsix` (for distribution outside this machine):
 
 ```powershell
-vsce package --baseContentUrl "file:///./" --allow-missing-repository
+npx --yes @vscode/vsce package --baseContentUrl "file:///./" --allow-missing-repository
 ```
 
-The `--baseContentUrl` flag suppresses the "relative image URLs require a repository" warning so the screenshot in README.md is accepted. `--allow-missing-repository` lets packaging succeed before this repo has a remote URL — drop both flags once `repository` is set in package.json.
+The `--baseContentUrl` flag suppresses the "relative image URLs require a repository" warning so the screenshot in README.md is accepted. `--allow-missing-repository` is kept defensively even though `repository` is set in package.json.
 
 ---
 
@@ -84,42 +84,20 @@ Do **not** edit version numbers in `install.ps1` — it reads from `package.json
 
 ---
 
-## 5. The context-percent formula (must match Claude Code's UI)
+## 5. The `/kick` skill artifact
 
-This is the single most important correctness contract in the extension. If the percent shown in `cc-ctx` diverges from what Claude Code itself shows in its bottom-right status, the extension has failed its job.
+The single file in `resources/` (`kick.md`) is deployed to `~/.claude/commands/kick.md` on every activate. The copy is idempotent and unconditional — every activate overwrites the file with the bundled source. There is no version marker; the file is small enough that a fresh copy on activate is cheaper than tracking a version.
 
-The formula (reverse-engineered from Claude Code's `vXe()` in `webview/index.js`):
+When editing `resources/kick.md`:
+- Keep the inline `node -e` block byte-for-byte if you do not have a specific reason to change it. The block is what makes the post-compact summary extraction work; whitespace inside the heredoc is significant.
+- Keep the file in English. The repo and the VS Code marketplace listing are English-first.
+- After editing, `./install.ps1` and `Developer: Reload Window` is enough to pick up the new version on the developer machine. End users get the new version on the next VSIX install + reload.
 
-```text
-context_tokens   = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
-effective_window = model_context_window − max_output_tokens − 13000
-percent          = context_tokens / effective_window * 100
-left_tokens      = max(0, effective_window − context_tokens)
-```
-
-The `13000` is Claude Code's reserved auto-compact safety margin and is a hard constant in the upstream codebase.
-
-`resolveContextWindow(model)` and `resolveMaxOutput(model)` in `extension.js` encode the per-model values. When a new Claude model ships:
-- If its context window is not 200k or 1M (`[1m]` suffix), extend `resolveContextWindow`.
-- If its `maxOutputTokens` is not the 64k default (Opus 4.0/4.1 use 8192, Claude 3.x uses 8192), extend `resolveMaxOutput`.
-- Verify by sending a real message in that model and comparing `cc-ctx` to Claude Code's own number. A 0.5% rounding gap is expected; anything larger is a bug.
+Do not delete or rename `resources/kick.md` without updating `ensureKickSkill()` in `extension.js`.
 
 ---
 
-## 6. Bundled `/kick` hook artifacts
-
-The four files in `resources/` are deployed to the user's `~/.claude/` on first activate. Install is idempotent and version-tracked via `~/.claude/.kick-installed-version`.
-
-When editing any `resources/*` file:
-- Bump `KICK_HOOK_VERSION` in `extension.js` so existing users re-deploy on next activate.
-- Make sure the hook still degrades gracefully if `node` is missing on PATH (the hook is invoked by Claude Code, which manages its own runtime).
-- Test both kick-on and kick-off branches: the toggle marker is `~/.claude/.kick-disabled` (presence = OFF).
-
-Do not delete or rename a `resources/*` file without coordinating with the deployment code in `extension.js`.
-
----
-
-## 7. Two READMEs must stay in sync
+## 6. Two READMEs must stay in sync
 
 `README.md` (English) and `README_ru.md` (Russian) are the primary user-facing docs. Both are bundled inside the `.vsix` (see `.vscodeignore`).
 
@@ -133,9 +111,9 @@ Different prose tone is fine; different structure or different content is a drif
 
 ---
 
-## 8. Secrets and what never reaches the public repo
+## 7. Secrets and what never reaches the public repo
 
-This repo is intended for a **public** GitHub repository. Treat anything in the local working tree as potentially observable.
+This repo is a **public** GitHub repository. Treat anything in the local working tree as potentially observable.
 
 The following must never be staged or pushed:
 - `.env` — contains `GITHUB_LOGIN`, `GH_TOKEN`, and any other automation secrets.
@@ -154,40 +132,43 @@ git check-ignore -v .env .secrets/git-askpass.ps1
 
 Both should report a match in `.gitignore`. If either does not, stop and fix the ignore — do not stage.
 
-`claude-limit-web.png` and `status-bar.png` (the README screenshots) are **not** secret and must be committed: both READMEs reference them.
+`claude-limit-web.png` (the README screenshot) is **not** secret and must be committed: both READMEs reference it.
 
 ---
 
-## 9. Testing
+## 8. Testing
 
 There is no automated test suite. Verification is manual and consists of:
 
 1. `./install.ps1` succeeds (`REMOVED=...`, `INSTALLED=...`, `REGISTRY_UPDATED=...`).
 2. `Developer: Reload Window` in VS Code.
-3. Open any Claude Code session and confirm:
-   - `cc-ctx` shows a percent and a colored bar.
-   - The percent agrees with Claude Code's own bottom-right number (allow 0.5–1% rounding).
-   - Hover tooltip renders without flicker on a static cursor for at least 30 seconds.
-   - The kick indicator toggles when clicked, and `~/.claude/.kick-disabled` appears/disappears in sync.
-4. Open a session with no recent `usage` entries and confirm the extension does not crash (status shows a neutral state).
+3. Open VS Code. Confirm:
+   - Exactly one new status bar item appears: `$(pulse) limit`. No `cc-ctx`, no `🟢/⚪` dot.
+   - Click `limit`. The Claude Quota panel opens. The 5h and 7d percentages render. The `/context` block fetches successfully when a workspace is open.
+4. Open any Claude Code chat. Type `/kick`. A fenced markdown block appears in the chat with a Copy button at its top right.
+5. Inspect `~/.claude/`:
+   - `~/.claude/commands/kick.md` exists.
+   - `~/.claude/scripts/kick-hook.js` does NOT exist (cleaned up if it was there).
+   - `~/.claude/commands/kick-on.md` and `kick-off.md` do NOT exist.
+   - `~/.claude/.kick-installed-version`, `.kick-disabled`, `.kick-log` do NOT exist.
+   - `~/.claude/settings.json` is valid JSON and does not contain the string `kick-hook.js`.
 
 If any of the above fails, do not package or release. Fix and reinstall first.
 
 ---
 
-## 10. Tooling notes specific to this project
+## 9. Tooling notes specific to this project
 
-- **`vsce`** — install once globally: `npm i -g @vscode/vsce`. Run from the project root.
+- **`vsce`** — invoked via `npx --yes @vscode/vsce package ...` so no global install is required. Run from the project root.
 - **`install.ps1`** is Windows-only (PowerShell). The extension itself is cross-platform — only the local install helper depends on Windows paths. Linux/macOS users install via `code --install-extension <vsix>`.
-- **No `node_modules`** are checked in or required at runtime. The extension uses only the VS Code API plus Node's built-in `fs`, `path`, and `os`. If you add a runtime dependency, also add a bundler step and revisit `.vscodeignore` — currently `node_modules/**` is excluded from the package.
+- **No `node_modules`** are checked in or required at runtime. The extension uses only the VS Code API plus Node's built-in `fs`, `path`, `os`, and `child_process`. If you add a runtime dependency, also add a bundler step and revisit `.vscodeignore` — currently `node_modules/**` is excluded from the package.
 
 ---
 
-## 11. Forbidden
+## 10. Forbidden
 
 1. Committing `.env`, `.secrets/`, or anything containing a real token / password / API key.
 2. Pushing `.vsix` artifacts to the repo (use GitHub Releases instead).
-3. Diverging the context-percent formula from Claude Code's `vXe()` without re-verifying against a live session.
-4. Editing only one of `README.md` / `README_ru.md` for a user-visible change.
-5. Renaming or deleting a `resources/*` file without updating the deployment code and bumping `KICK_HOOK_VERSION`.
-6. Adding network calls to the extension. It is local-only by design; that is a stated guarantee in both READMEs.
+3. Editing only one of `README.md` / `README_ru.md` for a user-visible change.
+4. Re-introducing the v0.4.x PostCompact hook surface (`scripts/kick-hook.js`, `commands/kick-on.md`, `commands/kick-off.md`, `hooks.PostCompact` entry) without a documented platform-side fix from Anthropic that makes `systemMessage` render in VS Code.
+5. Adding network calls beyond the two Anthropic OAuth endpoints already used. The extension is intentionally narrow; that is a stated guarantee in both READMEs.

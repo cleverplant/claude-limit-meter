@@ -10,6 +10,8 @@ Screenshot_*.png
 install.ps1
 fix-registry.js
 tools/**
+plans/**
+PLANS.md
 *.vsix
 *.log
 *.tmp
