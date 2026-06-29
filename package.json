@@ -2,7 +2,7 @@
   "name": "claude-limit-meter",
   "displayName": "Claude Limit Meter",
   "description": "Status bar button that opens an Anthropic quota panel (5h / 7d) and installs the /kick slash command for chat handoff.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "local",
   "repository": {
     "type": "git",

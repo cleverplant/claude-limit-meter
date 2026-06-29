@@ -281,3 +281,78 @@ The commands schema must be exactly:
 ---
 
 Change note (2026-06-29 02:55Z): initial creation. Plan written in response to the user's explicit instruction to autonomously refactor the extension and capture the work in `plans/plan.md` per the `PLANS.md` template. The plan is self-contained — a contributor starting from this file alone should be able to ship the same `v0.5.0`.
+
+---
+
+## Stage 2 — README clarity pass (added 2026-06-29, deferred)
+
+**Status:** queued. User asked to capture requirements only; execution paused because the user's Anthropic 5h/7d account quota is running low — work resumes in this same chat once quota resets (or sooner if the user explicitly says continue). Do NOT assume a chat handoff is needed.
+
+**Version question open:** the user has NOT yet decided whether this is a v0.5.1 bump or a v0.5.0 re-cut (delete tag + re-publish under the same tag). The plan below is written for v0.5.1 as the safe default; if the user picks the re-cut path, replace every "v0.5.1" with "v0.5.0", skip the package.json version bump, and add `gh release delete v0.5.0 --yes --cleanup-tag` as the first step before re-pushing the tag. Ask once at resume time before doing either.
+
+### What the user asked for, verbatim
+
+> 1) В обоих README НУЖНО СКОРРЕКТИРОВАТЬ ТЕКСТ. Где то в САМОМ НАЧАЛЕ ДАТЬ ИНФОРМАЦИЮ о том, ЧТО первый блок Anthropic quota актуален для Вашего аккаунта и не имеет привязки к используемой модели CLI или Claude Code for VS Code? а второй блок инфо панели имеет отношение только к CLI. Там что то есть про это, но надо убрать прежнее предупреждение, а сделать общее, чтобы в самом начале пользователь понимал, что это за расширение - что оно ему дает!
+>
+> 2) на самый верх помести актуальные скриншоты сначала этот: `C:\Users\Admin\Documents\PlatformIO\claude-limit-meter\quota.png` а ниже этот: `C:\Users\Admin\Documents\PlatformIO\claude-limit-meter\limit.png`.
+>
+> 3) проделать все операции соответственно с самим расширением, чтобы при установке юзер видел исправленное описание.
+>
+> 4) проделать все операции с гитхабом И релизом.
+
+### Screenshot files
+
+The user clarified in a follow-up message:
+
+- Top: `claude-limit-meter\quota.png` — the Anthropic quota block.
+- Below: `claude-limit-meter\limit.png` — the `/context` block (or whatever the limit panel detail view looks like; verify by opening the file).
+
+Verify both files exist on disk before starting work; if either is missing, ask the user.
+
+### Goal of the README pass
+
+Replace the existing top-of-page "Heads-up about data source" callout with a short, neutral **"What this extension gives you"** intro at the very top of both READMEs (English and Russian, structurally parallel). The new intro must make these two points unambiguous before any technical detail:
+
+1. **First panel block — Anthropic quota (5h + 7d).** Tied to your **Anthropic account**, not to which model you happen to use, not to where you launched Claude Code from (CLI vs VS Code Claude Code panel). The numbers come straight from Anthropic's `oauth/usage` endpoint. They reflect plan billing, not session state.
+2. **Second panel block — `/context`.** Tied **only to the CLI**. It spawns a fresh CLI sub-session in the chosen workspace folder and parses `/context` output. It does **not** show what the VS Code Claude Code GUI panel sees in its live session. The model name and percentages can differ from the GUI panel.
+
+The current top callout (`> Heads-up about data source. ...`) explains the same thing but only as a warning about discrepancy. Reframe positively: tell the user what each block *is for* first, and only after that mention the GUI/CLI divergence as a corollary.
+
+### Concrete work when work resumes (in order)
+
+1. **Confirm with user: v0.5.1 bump or v0.5.0 re-cut?** Default-assume v0.5.1 if no answer. If re-cut, replace every `0.5.1` below with `0.5.0` and start with `gh release delete v0.5.0 --yes --cleanup-tag` + `git tag -d v0.5.0` + `git push origin :refs/tags/v0.5.0`.
+2. **Confirm both screenshot files exist** at `quota.png` and `limit.png` in the repo root.
+3. **Bump version to `0.5.1` in `package.json`** (skip if user picked re-cut).
+4. **Edit `backup frontend/index.html`?** — No. This project's frontend rule (CLAUDE.md §1, §4) applies to the ESP32-S3 project, not to `claude-limit-meter`. In `claude-limit-meter` the only "frontend" is the webview HTML built in `extension.js`'s `buildFullHtml`; the README is not an HTML build artifact and does not need a gzip rebuild.
+5. **Drop the two screenshots into the repo root** (if not already there). Verify each is a valid PNG with `node -e "const b=require('fs').readFileSync('quota.png');console.log(b.slice(0,8).toString('hex'))"` — expect `89504e470d0a1a0a`.
+6. **Add a new "What's new in 0.5.1" section** at the top of both READMEs (after the download badge line, before the screenshots). Keep it to 2–3 lines: "Clarified that the quota block reflects your Anthropic account (not the CLI model), and that the `/context` block reflects CLI state only (not the GUI Claude Code panel). Two screenshots at the top now show both panel blocks separately."
+7. **Replace the current top callout** in both READMEs with the new positive-framing intro. Keep the GUI/CLI divergence note, but as a sentence inside the intro, not as a leading warning.
+8. **Swap the screenshot at the very top.** Remove the existing single `claude-limit-web.png` reference at the top of both READMEs. Insert two consecutive image references (the two files from step 1), each with descriptive alt text ("Anthropic quota — 5h and 7-day blocks" and "Project context (/context) — model + token breakdown" or whatever fits).
+9. **Decide on `claude-limit-web.png`:** if it is now redundant after the two new screenshots, mark it for removal in the same commit; otherwise leave it in place if it still appears lower in the README. Same question for `status-bar.png` (already unreferenced — fold the cleanup into this commit). Ask user if unsure.
+10. **Mirror all changes between `README.md` and `README_ru.md`** per CLAUDE.md (the project's own CLAUDE.md, not the ESP32-S3 one) §6.
+11. **Rebuild VSIX:** `powershell -NoProfile -Command "npx --yes @vscode/vsce package --baseContentUrl 'file:///./' --allow-missing-repository"`. Expect `claude-limit-meter-0.5.1.vsix`.
+12. **Inspect the .vsix file list** (vsce prints it) and confirm both new screenshots are inside. If `.vscodeignore` excludes them by pattern, fix.
+13. **Run `./install.ps1`** locally. Expect `REGISTRY_UPDATED=0.5.1`.
+14. **Reload window** and visually confirm the README on the extension's marketplace pane (Extensions panel → Claude Limit Meter → README tab) shows the two new screenshots at the top in correct order with correct alt text.
+15. **Commit** with message `docs: clarify quota vs /context scope, refresh top screenshots (v0.5.1)`. Stage explicit paths only: `package.json`, `README.md`, `README_ru.md`, the two new `*.png` files, and any cleanup of old screenshots.
+16. **Push** via the ignored GIT_ASKPASS helper (same flow as v0.5.0).
+17. **Create GitHub Release v0.5.1** with the new VSIX attached, notes summarizing what changed and crediting v0.5.0 as the latest functional release (no code changes in v0.5.1).
+18. **Update v0.5.0 release notes** to add a one-line pointer at the bottom: "v0.5.1 docs follow-up clarifies quota vs /context scope — VSIX is functionally identical."
+
+### Forbidden during this stage
+
+- Do NOT touch `extension.js`, `package.json` settings/commands schema, or `resources/kick.md`. This is a docs-only stage.
+- Do NOT re-introduce the cc-ctx / PostCompact surface — see "Forbidden" in Stage 1.
+- Do NOT delete `claude-limit-web.png` without explicit user OK if it is still referenced anywhere in the READMEs.
+- Do NOT push a v0.5.1 release that contains code changes alongside the docs change. If a code fix is needed, ship it as v0.5.2 separately.
+
+### Validation
+
+Acceptance criteria for Stage 2:
+
+- Both READMEs open with two consecutive screenshots, then a "What's new in 0.5.1" section, then the positive-framing intro that explains what each panel block represents.
+- The phrase "Anthropic account" appears in the intro of both READMEs at least once.
+- The phrase "CLI sub-session" or equivalent appears in the description of the second panel block.
+- The old `> Heads-up about data source` callout is gone in both READMEs.
+- `gh release view v0.5.1` shows the new VSIX as a release asset.
+- The VS Code marketplace pane for the locally installed `local.claude-limit-meter-0.5.1` shows the two new screenshots at the top in correct order.

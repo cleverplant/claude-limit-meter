@@ -1,22 +1,53 @@
 # Claude Limit Meter
 
-[Download VSIX v0.5.0](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.5.0/claude-limit-meter-0.5.0.vsix) · [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.5.0) · [Русская версия](README_ru.md)
+[Download VSIX v0.5.1](https://github.com/cleverplant/claude-limit-meter/releases/download/v0.5.1/claude-limit-meter-0.5.1.vsix) · [Release notes](https://github.com/cleverplant/claude-limit-meter/releases/tag/v0.5.1) · [Русская версия](README_ru.md)
 
-![Claude Quota panel](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/claude-limit-web.png)
+![Claude Quota panel](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/quota.png)
 
-> **Heads-up about data source.** This extension reads everything from the
-> **CLI (terminal) Claude Code** — its OAuth credentials in
-> `~/.claude/.credentials.json` and, for the `/context` block, a fresh
-> CLI sub-session spawned in the chosen workspace folder. It does **not**
-> talk to the graphical "Claude Code for VS Code" panel and has no access
-> to its in-memory state. As a result, the `/context` block inside the
-> Quota web-panel can show a different model or token breakdown than the
-> GUI Claude Code panel for the same project — the CLI spawns a fresh
-> session to evaluate `/context`, while the GUI shows the live session it
-> has open. The 5h / 7-day quota numbers, on the other hand, come from the
-> Anthropic account and always match across CLI and GUI.
+![limit status bar item](https://raw.githubusercontent.com/cleverplant/claude-limit-meter/main/limit.png)
+
+## What this extension gives you
+
+A single `limit` button in the VS Code status bar. Click it and a panel
+opens with two independent blocks:
+
+1. **Anthropic quota (5h / 7d).** Your real account-level rate limits —
+   the same numbers Anthropic enforces at the account level. They are
+   tied to your Anthropic plan (`Pro` / `Max` / `Free`), **not** to the
+   model you happen to be using and **not** to which surface is making
+   the call. The 5h window and the 7-day window are the same whether
+   you talk to Claude through the CLI, the VS Code "Claude Code" panel,
+   the JetBrains plugin, or claude.ai in a browser — they all draw from
+   one account budget. This block shows you that budget.
+2. **Project context (`/context`).** This block runs the **CLI**
+   `/context` command inside a workspace folder of your choice and
+   shows the model name plus the token breakdown (system prompt, memory
+   files, MCP tools, free space, autocompact buffer, etc.) for a fresh
+   CLI sub-session in that folder. It is a CLI-only measurement — it
+   does **not** reflect the live VS Code Claude Code panel session and
+   can show a different model or different numbers than that panel.
+
+If you only care about "am I about to hit my 5h or weekly limit?", the
+top block is enough and is independent of which Claude surface you use.
+The bottom block is for users who run the CLI directly and want to see
+what `/context` reports without leaving the editor.
+
+The extension also installs a `/kick` slash command for handing off
+work from a near-full chat into a fresh one. See [The `/kick` slash
+command](#the-kick-slash-command) below.
 
 ---
+
+## What's new in 0.5.1
+
+Documentation-only release. No code or behavior changes.
+
+- The README now opens with a positive description of what the
+  extension actually gives you (the two panel blocks and what each one
+  is tied to), instead of a warning-style heads-up about data sources.
+- Two top-of-README screenshots replace the older composite image:
+  `quota.png` (the Quota panel itself) and `limit.png` (the status bar
+  button), so you can see what you get before installing.
 
 ## What's new in 0.5.0
 
@@ -92,9 +123,9 @@ A panel that opens in the editor area with two blocks:
   used, and a breakdown by category (System prompt, Memory files, Skills,
   Messages, etc.).
 
-> ⚠️ The `/context` block runs a CLI sub-session, not your live VS Code
+> The `/context` block runs a CLI sub-session, not your live VS Code
 > Claude Code session. The model and percentages can differ from the
-> GUI panel — see the heads-up at the top.
+> GUI Claude Code panel — see "What this extension gives you" above.
 
 ### The `/kick` slash command
 
